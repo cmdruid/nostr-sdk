@@ -1,0 +1,58 @@
+{
+  "name": "@cmdcode/nostr-sdk",
+  "version": "0.0.1",
+  "description": "A development kit for building nostr apps.",
+  "author": "Christopher Scott",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cmdruid/nostr-sdk.git"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
+  "files": [
+    "README.md",
+    "LICENSE",
+    "dist",
+    "src"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "./scripts/build.sh",
+    "load": "tsx --tsconfig ./test/tsconfig.json",
+    "release": "yarn test && yarn build",
+    "scratch": "yarn load test/scratch.ts",
+    "test": "yarn load test/tape.ts | tap-spec"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^25.0.7",
+    "@rollup/plugin-node-resolve": "^15.2.3",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^11.1.6",
+    "@types/node": "^20.11.16",
+    "@types/tape": "^5.6.4",
+    "rollup": "^4.9.6",
+    "tap-spec": "^5.0.0",
+    "tape": "^5.7.4",
+    "tslib": "^2.6.2",
+    "tsx": "^4.6.2",
+    "typedoc": "^0.25.9",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "@cmdcode/buff": "2.2.5",
+    "@cmdcode/crypto-tools": "2.7.6",
+    "@cmdcode/signer": "^1.4.2",
+    "websocket-polyfill": "^0.0.3",
+    "zod": "^3.22.4"
+  }
+}
