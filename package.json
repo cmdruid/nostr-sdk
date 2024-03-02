@@ -28,7 +28,7 @@
   },
   "scripts": {
     "build": "./scripts/build.sh",
-    "docs": "yarn typedoc --options docs/config.json",
+    "docs": "yarn typedoc --options config/docs.json",
     "load": "tsx --tsconfig ./test/tsconfig.json",
     "release": "yarn test && yarn build && yarn docs",
     "scratch": "yarn load test/scratch.ts",
