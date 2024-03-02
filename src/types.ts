@@ -1,10 +1,20 @@
-import { NostrSocket } from './class/socket.js'
+import { NostrSocket } from "./index.js"
 
 export type ReceiptEnvelope = [
   id : string,
   ok : boolean,
   reason : string
 ]
+
+export interface ChannelConfig {
+  debug   : boolean
+  echo    : boolean
+  filter  : EventFilter
+  kind    : number
+  socket  : NostrSocket | null
+  tags    : string[][]
+  verbose : boolean
+}
 
 export interface EventMessage <T = any> {
   body     : T
@@ -38,23 +48,30 @@ export interface SignedEvent extends UnsignedEvent {
 export interface SocketConfig {
   connect_retries : number
   connect_timeout : number
-  echo_timeout    : number
   receipt_timeout : number
   send_delta      : number
   debug           : boolean
   verbose         : boolean
 }
 
-export interface StoreConfig<T> extends SocketConfig {
+export interface StoreConfig<T> {
   buffer_timer  : number
-  refresh_ival  : number
-  update_timer  : number
-  parser       ?: (data : unknown) => Promise<T>
-  socket       ?: NostrSocket
+  debug         : boolean
+  filter        : EventFilter
+  kind          : number
+  parser       ?: (data : unknown) => T
+  socket        : NostrSocket | null
+  tags          : string[][]
+  verbose       : boolean
+}
+
+export interface StoreItem {
+  id         : string
+  secret     : string
+  updated_at : number
 }
 
 export interface SubscribeConfig {
   filter : EventFilter
-  echo   : boolean
   sub_id : string
 }

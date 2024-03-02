@@ -2,8 +2,9 @@
   "compilerOptions": {
     "baseUrl": "..",
     "paths": {
-      "@/*"      : [ "src/*"  ],
-      "@/test/*" : [ "test/*" ]
+      "@/*"                : [ "src/*"  ],
+      "@/test/*"           : [ "test/*" ],
+      "@cmdcode/nostr-sdk" : [ "src/index.js" ],
     },
     "module": "NodeNext",
     "target": "ESNext",

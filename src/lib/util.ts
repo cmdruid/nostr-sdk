@@ -7,15 +7,22 @@ export function exists <T> (
   return true
 }
 
-export function get_entry <T = string[]> (
+export function has_entry (
   label   : string,
-  entries : [ string, T ][]
-) : T {
+  entries : string[][]
+) : boolean {
+  return entries.find(e => e[0] === label) !== undefined
+}
+
+export function get_entry (
+  label   : string,
+  entries : string[][]
+) : string[] {
   const ent = entries.find(e => e[0] === label)
   if (ent === undefined) {
-    throw new Error('Entry not found for label: ' + label)
+    throw new Error('label not found: ' + label)
   }
-  return ent[1]
+  return ent
 }
 
 export function is_hex (

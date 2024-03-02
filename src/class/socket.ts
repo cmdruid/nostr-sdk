@@ -1,4 +1,4 @@
-import 'websocket-polyfill'
+import WebSocket from 'isomorphic-ws'
 
 import { Buff }         from '@cmdcode/buff'
 import { verify_sig }   from '@cmdcode/crypto-tools/signer'
@@ -18,30 +18,25 @@ import {
   UnsignedEvent,
 } from '../types.js'
 
-// Default options to use.
 export const SOCKET_DEFAULTS = () : SocketConfig => {
   return {
     connect_retries : 10,
     connect_timeout : 500,
-    echo_timeout    : 4000,
     send_delta      : 1000,
     receipt_timeout : 4000,
-    // filter          : { since : now() } as EventFilter,
-    debug           : false,  // Silence noisy output.
-    verbose         : false,  // Show verbose log output.
+    debug           : false,
+    verbose         : false,
   }
 }
 
 export class NostrSocket extends EventEmitter <{
   'cancel'    : [ id : string, sub : NostrSub, reason : string ]
   'close'     : NostrSocket
-  'connect'   : NostrSocket
-  'echo'      : string
   'error'     : Error
   'event'     : EventMessage
   'notice'    : string
   'ready'     : NostrSocket
-  'reject'    : [ reason : string, envelope : unknown ]
+  'reject'    : [ reason : string, event : string ]
   'receipt'   : ReceiptEnvelope
   'subscribe' : [ id : string, sub : NostrSub ]
 }> {
@@ -54,7 +49,6 @@ export class NostrSocket extends EventEmitter <{
   _outbox   : SignedEvent[]
   _socket   : WebSocket | null
   _subs     : Map<string, NostrSub>
-  _topic_id : string | null
 
   constructor (options ?: Partial<SocketConfig>) {
     super()
@@ -64,7 +58,6 @@ export class NostrSocket extends EventEmitter <{
     this._outbox   = []
     this._socket   = null
     this._subs     = new Map()
-    this._topic_id = null
   }
 
   get address () {
@@ -109,6 +102,11 @@ export class NostrSocket extends EventEmitter <{
     }
   }
 
+  _bounce_handler (reason : string, event : string) {
+    this.log.debug(reason, event)
+    this.emit('reject', [ reason, event ])
+  }
+
   _err_handler (err : unknown) {
     const error = (err instanceof Error)
       ? err
@@ -120,13 +118,16 @@ export class NostrSocket extends EventEmitter <{
   async _event_handler (payload : string[]) {
     const [ sub_id, json ] = payload
 
+    const sub = this.subs.get(sub_id)
+
+    if (sub === undefined) {
+      return this._bounce_handler('missing subscription for event', json)
+    }
+
     const event = await parse_signed_note(json)
-    const sub   = this.get_sub(sub_id)
 
     if (event === null) {
-      this.log.debug('invalid event:', json)
-      this.emit('reject', [ 'invalid event', json ])
-      return
+      return this._bounce_handler('event failed validation', json)
     }
 
     const { created_at, id, pubkey, sig } = event
@@ -136,9 +137,7 @@ export class NostrSocket extends EventEmitter <{
     this.log.info('event date     :', new Date(created_at * 1000))
 
     if (!verify_sig(sig, id, pubkey)) {
-      this.log.debug('bad signature:', json)
-      this.emit('reject', [ 'bad signature', json ])
-      return
+      return this._bounce_handler('invalid signature for event', json)
     }
 
     sub.emit('event', event)
@@ -205,15 +204,16 @@ export class NostrSocket extends EventEmitter <{
     this.emit('receipt', payload)
   }
 
-  _publish (events ?: SignedEvent[]) {
+  _publish (events : SignedEvent[] = []) {
     let delay  = 0 
-    const arr  = events ?? [ ...this._outbox ]
+    const arr  = [ ...this._outbox, ...events ]
     const prom = arr.map(async (event) => {
       const req = [ 'EVENT', event ]
       this.socket.send(JSON.stringify(req))
       await sleep(delay)
       delay += this.opt.send_delta
     })
+    this._outbox = []
     return Promise.all(prom)
   }
 
@@ -229,12 +229,14 @@ export class NostrSocket extends EventEmitter <{
     return Promise.all(prom)
   }
 
-  async cancel (sub_id : string) {
+  cancel (sub_id : string) {
     if (this.subs.has(sub_id)) {
-      const sub_req = [ 'CLOSE', sub_id ]
+      if (this.connected) {
+        const sub_req = [ 'CLOSE', sub_id ]
+        this.socket.send(JSON.stringify(sub_req))
+      }
       this.log.info('cancelling sub :', sub_id)
       this._cancel_handler([ sub_id, '' ])
-      this.socket.send(JSON.stringify(sub_req))
     }
   }
 
@@ -247,13 +249,8 @@ export class NostrSocket extends EventEmitter <{
       throw new Error('Must provide a valid relay address!')
     }
 
-    // if (!this._secret) {
-    //   throw new Error('Must provide a shared secret!')
-    // }
-
     if (address !== undefined || this.socket.readyState > 1) {
       this._socket = new WebSocket(this.address)
-      // Setup our main socket event listeners.
     }
 
     if (this.connected) return
@@ -286,7 +283,7 @@ export class NostrSocket extends EventEmitter <{
 
   close () {
     this.socket.close()
-    this._subs = new Map()
+    this.subs.forEach(e => e.cancel())
     this.emit('close', this)
   }
 
@@ -306,7 +303,7 @@ export class NostrSocket extends EventEmitter <{
     this.log.debug('send envelope :', rest)
 
     if (!this.connected) {
-      this.log.info('buffered evt : ' + event.id)
+      this.log.info('buffered evt   : ' + event.id)
       this._outbox.push(event)
     } else {
       this._publish([ event ])
@@ -328,7 +325,7 @@ export class NostrSocket extends EventEmitter <{
 
   async send (
     event  : UnsignedEvent,
-    signer : (msg : string) => Promise<string>
+    signer : (msg : string) => string | Promise<string>
   ) {
     // Sign our message.
     const signed  = await this.sign(event, signer)
@@ -342,7 +339,7 @@ export class NostrSocket extends EventEmitter <{
 
   async sign (
     event  : UnsignedEvent,
-    signer : (msg : string) => Promise<string>
+    signer : (msg : string) => string | Promise<string>
   ) {
     const id  = get_event_id(event)
     const sig = await signer(id)
@@ -362,7 +359,7 @@ export class NostrSocket extends EventEmitter <{
     this.log.debug('sub filter:', filter)
 
     if (this.connected) {
-      this.log.info('buffered sub : ' + sub_id)
+      this.log.info('buffered sub   : ' + sub_id)
       this._subscribe([[ sub_id, subdata ]])
     } else {
       this.log.info('registered sub : ' + sub_id)

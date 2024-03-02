@@ -15,7 +15,6 @@ export class NostrSub extends EventEmitter <{
   'ready'   : NostrSub
 }> {
 
-  readonly _echo   : boolean
   readonly _socket : NostrSocket
   readonly _sub_id : string
 
@@ -28,7 +27,6 @@ export class NostrSub extends EventEmitter <{
     config : Partial<SubscribeConfig> = {}
   ) {
     super()
-    this._echo   = config.echo ?? false
     this._socket = socket
     this._sub_id = config.sub_id ?? Buff.random(32).hex
     this._filter = filter ?? { since : now() }
@@ -43,7 +41,7 @@ export class NostrSub extends EventEmitter <{
     return this._sub_id
   }
 
-  get is_ready () {
+  get ready () {
     return this._init
   }
 

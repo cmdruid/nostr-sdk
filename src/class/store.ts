@@ -1,101 +1,105 @@
-import { Buff }         from '@cmdcode/buff'
-import { stringify }    from '@/lib/util.js'
-import { EventEmitter } from './emitter.js'
-import { NostrSub }     from './sub.js'
+import { Buff }            from '@cmdcode/buff'
+import { SignerAPI }       from '@cmdcode/signer'
+import { EventEmitter }    from './emitter.js'
+import { combine_filters } from '@/lib/filter.js'
+
+import {
+  has_entry,
+  now,
+  stringify
+} from '@/lib/util.js'
+
+import {
+  check_store_key,
+  decrypt_content,
+  decrypt_store_key,
+  encrypt_content
+} from '@/lib/crypto.js'
 
 import {
   NostrSocket,
-  SOCKET_DEFAULTS
 } from './socket.js'
 
 import {
   EventFilter,
-  EventMessage,
-  StoreConfig
+  SignedEvent,
+  SocketConfig,
+  StoreConfig,
+  StoreItem
 } from '../types.js'
 
-// The store uses the same encryption wrapping as the channel.
-// We don't need a message bus, as there is only store updates.
-
-const now = () => Math.floor(Date.now() / 1000)
-
-const DEFAULT_OPT = {
-  ...SOCKET_DEFAULTS(),
+const DEFAULT_CONFIG = {
   buffer_timer : 2000,
+  debug        : false,
   filter       : { limit : 10 } as EventFilter,
   kind         : 30000,
-  refresh_ival : 10,
-  update_timer : 5000
+  socket       : null,
+  tags         : [],
+  verbose      : false
 }
 
-async function DEFAULT_PARSER <T> (data : unknown) {
-  return data as Promise<T>
+import * as assert from '@/assert.js'
+
+function DEFAULT_PARSER <T> (data : unknown) {
+  return data as T
 }
 
 export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
-  'commit' : string
-  'error'  : Error
+  'close'  : NostrStore<T>
+  'error'  : [ error : unknown, data : unknown ]
   'ready'  : NostrStore<T>
-  'reject' : EventMessage<T>
+  'reject' : [ reason : string, event : SignedEvent ]
   'update' : NostrStore<T>
 }> {
 
-  readonly _opt    : StoreConfig<T>
-  readonly _parser : (data : unknown) => Promise<T>
+  static list = fetch_stores
 
-  _buffer    ?: ReturnType<typeof setTimeout>
-  _commit_id  : string   | null
-  _data       : T        | null
-  _init       : boolean
-  _outbox    ?: ReturnType<typeof setTimeout>
-  _prev       : T        | null
-  _socket     : NostrSocket
-  _sub        : NostrSub | null
-  _updated    : number   | null
+  readonly _filter : EventFilter
+  readonly _opt    : StoreConfig<T>
+  readonly _parser : (data : unknown) => T
+  readonly _secret : Buff
+  readonly _signer : SignerAPI
+
+  _buffer ?: ReturnType<typeof setTimeout>
+  _data    : T           | null
+  _init    : boolean
+  _prev    : T           | null
+  _socket  : NostrSocket | null
+  _updated : number      | null
 
   constructor (
-    socket  : NostrSocket,
+    secret  : string,
+    signer  : SignerAPI,
     config ?: Partial<StoreConfig<T>>
   ) {
-    const opt = { ...DEFAULT_OPT, ...config, selfsub : true, }
+    const opt = { ...DEFAULT_CONFIG, ...config }
+
+    assert.is_hex(secret)
+    assert.size(secret, 32)
+
     super()
-    this._opt        = opt
-    this._buffer     = undefined
-    this._data       = null
-    this._init       = false
-    this._parser     = opt.parser ?? DEFAULT_PARSER
-    this._prev       = null
-    this._commit_id  = null
-    this._updated    = null
-    this._socket     = socket
-    this._sub        = socket.subscribe({
-      envelope : { kind  : 30000 },
-      filter   : { limit : 1 },
-      selfsub  : true
+    this._opt    = opt
+    this._parser = opt.parser ?? DEFAULT_PARSER
+    this._signer = signer
+    this._secret = Buff.str(secret).digest
+
+    this._filter = combine_filters(opt.filter, {
+      kinds : [ opt.kind ],
+      '#d'  : [ this.id  ]
     })
 
-    this._socket.on('error', (err) => this.emit('error', err))
+    this._buffer  = undefined
+    this._data    = null
+    this._init    = false
+    this._prev    = null
+    this._socket  = opt.socket
+    this._updated = null
 
-    this.sub.on('message', (msg : EventMessage<T>) => {
-      try {
-        if (!this._msg_filter(msg) || !this._validate(msg.body)) {
-          this._bounce_handler(msg)
-        } else {
-          this._msg_handler(msg)
-        }
-      } catch (err) {
-        this._err_handler(err)
-      }
-    })
-  }
-
-  get commit_id () {
-    if (this._commit_id === null) {
-      throw new Error('store is not initialized')
+    if (this._socket !== null) {
+      this.socket.on('ready', () => void this.refresh())
     }
-    return this._commit_id
   }
- 
+
   get data () {
     if (this._data === null) {
       throw new Error('store is not initialized')
@@ -103,42 +107,40 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     return this._data
   }
 
-  get is_ready () {
-    return this._init
+  get filter () {
+    return this._filter
   }
 
-  get is_stale () {
-    // Check if our subscription is stale.
-    const ival = this.opt.refresh_ival
-    return now() > this.updated_at + ival
+  get hash () {
+    const body = stringify(this.data)
+    return Buff.str(body).digest.hex
   }
 
-  get opt () {
-    return this._opt
+  get id () {
+    return this._secret.digest.hex
   }
 
   get pubkey () {
-    return this._socket.pubkey
+    return this._signer.pubkey
+  }
+
+  get ready () {
+    return this._init
+  }
+
+  get secret () {
+    return this._secret.hex
   }
 
   get socket () {
+    if (this._socket === null) {
+      throw new Error('socket not initialized')
+    }
     return this._socket
   }
 
   get store () {
     return new Map(Object.entries(this.data))
-  }
-
-  get store_id () {
-    const body = stringify(this.data)
-    return Buff.str(body).digest.hex
-  }
-
-  get sub () {
-    if (this._sub === null) {
-      throw new Error('store not subscribed')
-    }
-    return this._sub
   }
 
   get updated_at () {
@@ -150,154 +152,165 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
 
   log = {
     debug : (...s : unknown[]) => {
-      return (this.opt.debug) ? console.log('[store]', ...s) : null
+      return (this._opt.debug) ? console.log('[store]', ...s) : null
     },
     info  : (...s : unknown[]) => {
-      return (this.opt.verbose)  ? console.log('[store]', ...s) : null
+      return (this._opt.verbose)  ? console.log('[store]', ...s) : null
     }
   }
 
-  _bounce_handler (msg : EventMessage<T>) {
-    this.log.info(' msg bounced    :', msg.envelope.id)
-    this.emit('reject', msg)
+  _bounce_handler (reason : string, event : SignedEvent) {
+    this.log.info ('msg bounced    :', reason)
+    this.log.debug('msg bounced    :', event)
+    this.emit('reject', [ reason, event ])
   }
 
-  async _err_handler (err : unknown) {
-    this._socket._err_handler(err)
-  }
-
-  _initialize (data : T) {
-    this._updated = now()
-    this._prev    = this._data ?? data
-    this._data    = data
-    this._init    = true
-    this._socket.subs.delete(this.sub.id)
-    this._socket.on('connect', () => {
-      this._send('post', data)
-    })
-    this._socket.on('ready', () => {
-      this.emit('ready', this)
-    })
-  }
-
-  _msg_filter (msg : EventMessage) {
-    const { body, envelope } = msg
-    if (body === null || body === undefined) {
-      return false 
-    }
-    if (this._updated !== null) {
-      const cat = envelope.created_at
-      if (this.updated_at > cat) {
-        return false
-      }
-    }
-    return true
-  }
-
-  async _msg_handler (msg : EventMessage) {
-    const { body, envelope } = msg
-    const cat = envelope.created_at
-    try {
-      if (!this.is_ready || cat > this.updated_at) {
-        this._updated = cat
-        clearTimeout(this._buffer)
-        this._buffer = setTimeout(() => {
-          this.sub.cancel()
-          this._msg_update(body, cat)
-        }, this.opt.buffer_timer)
-      }
-    } catch (err) {
-      this._err_handler(err)
-    }
-  }
-
-  async _msg_update (data : unknown, created_at : number) {
-    const json = (typeof data === 'string')
-      ? JSON.parse(data, json_decoder)
-      : data
-    const parsed = await this._parser(json)
-    this._update(parsed, created_at)
-  }
-
-  async _send (method : string, data : unknown) {
-    clearTimeout(this._outbox)
-    this._outbox = setTimeout(async () => {
-      const parsed  = await this._parser(data)
-      const encoded = JSON.stringify(parsed, json_encoder)
-      this.log.info(' store method   :', method)
-      this.log.info(' store data     :', parsed)
-      this.sub.send(method, encoded, undefined, true)
-    }, this.opt.buffer_timer)
-  }
-
-  _update (data : T, updated = now()) {
-    this._updated = updated
-    this._prev    = this._data ?? data
-    this._data    = data
-    if (!this.is_ready) {
-      // Set init to true.
-      this._init = true
-      // Emit ready message.
-      this.emit('ready', this)
-    } else {
-      this._send('post', data)
-      this.emit('update', this)
-    }
-    // Print debug message to console.
-    this.log.debug('update data:', this.data)
-  }
-
-  async _validate (data : T) {
-    try {
-      await this._parser(data)
+  _event_filter (event : SignedEvent) {
+    if (this._updated === null) {
       return true
-    } catch {
-      return false
+    } else {
+      return (event.created_at > this._updated)
     }
   }
 
-  async connect (address : string, secret : string) {
-    await this._socket.connect(address, secret)
+  _event_handler (event : SignedEvent) {
+    if (!this._event_filter(event)) {
+      this.log.debug('event filtered : ', event.id)
+      return
+    }
+
+    if (!event.content.includes('?iv=')) {
+      return this._bounce_handler('store is not encrypted', event)
+    }
+
+    const { content, ...rest } = event
+
+    let data : T, store : T | null
+
+    try {
+      const json = decrypt_content(content, this.secret)
+      data       = JSON.parse(json, json_decoder)
+    } catch {
+      return this._bounce_handler('unable to decrypt store', event)
+    }
+
+    try {
+      store = this._parser(data)
+    } catch (err) {
+      this.log.info('invalid data  :', data)
+      this.log.debug('invalid data :', err)
+      return this._bounce_handler('failed validation', event)
+    }
+
+    this.log.debug('recv store    :', store)
+    this.log.debug('recv envelope :', rest)
+
+    this._updated = event.created_at
+
+    clearTimeout(this._buffer)
+
+    this._buffer = setTimeout(() => {
+      try {
+        this._update(data, [], this.updated_at)
+      } catch (err) {
+        this._err_handler(err, data)
+      }
+    }, this._opt.buffer_timer)
+  }
+
+  _err_handler (err : unknown, data : unknown) {
+    this.log.debug('error:', err)
+    this.log.debug('event:', data)
+    this.emit('error', [ err, data ])
+  }
+
+  async _send (
+    data    : unknown,
+    tags    : string[][],
+    updated : number
+    ) {
+    const parsed  = this._parser(data)
+    const json    = JSON.stringify(parsed, json_encoder)
+    const hash    = Buff.str(json).digest.hex
+
+    const event = {
+      content    : encrypt_content(json, this.secret),
+      created_at : updated,
+      kind       : this._opt.kind,
+      tags       : this._opt.tags,
+      pubkey     : this.pubkey
+    }
+
+    event.tags.push([ 'd', this.id ])
+    event.tags.push([ 'hash', hash ])
+    event.tags.push([ 'cred', this.id ])
+
+    tags.forEach(tag => event.tags.push(tag))
+
+    const signer = (msg : string) => this._signer.sign(msg)
+    const signed = await this.socket.sign(event, signer)
+
+    this.socket.publish(signed)
     return this
   }
 
-  async init (address : string, secret : string, store : T) {
-    // Initialize the store
-    this._initialize(store)
-    // Wait for a connection to the relay.
-    await this._socket.connect(address, secret)
-    // Return the store object.
+  async _update (
+    data : T,
+    tags : string[][] = [],
+    updated = now()
+  ) {
+    try {
+      await this._send(data, tags, updated)
+      this._updated = updated
+      this._prev    = this._data ?? data
+      this._data    = data
+
+      if (!this.ready) {
+        this._init = true
+        this.emit('ready', this)
+      } else {
+        this.emit('update', this)
+      }
+
+      this.log.info('store updated  :', this.hash)
+      this.log.debug('store updated :', this.data)
+    } catch (err) {
+      this._err_handler('error', [ err, data ])
+    }
     return this
   }
 
-  async on_update () {
-    const duration = this.opt.update_timer
-    const timeout  = 'store update timed out'
-    return new Promise((res, rej) => {
-      const timer = setTimeout(() => rej(timeout), duration)
-      this.within('update', () => {
-        clearTimeout(timer)
-        res(this)
-      }, duration)
-    }).catch(err => { throw new Error(err) })
+  connect (address : string, opt ?: Partial<SocketConfig>) {
+    this._socket = this._socket ?? new NostrSocket(opt)
+    this.socket.connect(address)
+    return this.refresh()
+  }
+
+  close () {
+    this.socket.close()
+    this.emit('close', this)
+    return this
+  }
+
+  delete () {
+    this.update(this.data, [[ 'deleted', 'true' ]])
+  }
+
+  init (
+    address : string, 
+    store   : T, 
+    opt    ?: Partial<SocketConfig>
+  ) {
+    this._socket = this._socket ?? new NostrSocket(opt)
+    this.socket.connect(address)
+    return this.update(store)
   }
 
   async refresh () {
-    const receipt = this.sub.when_ready()
-    this.sub.update()
-    return receipt
-  }
-
-  keys () {
-    return this.store.keys()
-  }
-  
-  values () {
-    return this.store.values()
-  }
-
-  entries () {
-    return this.store.entries()
+    await this.socket
+      .query(this.socket.address, this.filter)
+      .then(e => e.forEach(evt => this._event_handler(evt)))
+    return this
   }
 
   toString () {
@@ -308,9 +321,38 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     return this.data
   }
 
+  update (data : T, tags ?: string[][]) {
+    return this._update(data, tags)
+  }
+
   [Symbol.iterator] () {
     return this.store[Symbol.iterator]()
   }
+}
+
+export async function fetch_stores (
+  address  : string,
+  signer   : SignerAPI,
+  filter  ?: EventFilter,
+  options ?: SocketConfig
+) : Promise<StoreItem[]> {
+  filter = filter ?? { kinds : [ 30000 ] }
+
+  filter = combine_filters(filter, {
+    authors : [ signer.pubkey ],
+    '#d'    : []
+  })
+
+  const socket = new NostrSocket(options)
+  const result = await socket.query(address, filter)
+  const stores = result
+    .filter(e => !has_entry('deleted', e.tags))
+    .filter(e => check_store_key(e, signer))
+  return stores.map(e => {
+    const secret = decrypt_store_key(e, signer)
+    const id     = Buff.hex(secret).digest.hex
+    return { id, secret, updated_at : e.created_at }
+  })
 }
 
 function json_encoder (_key : string, value : any) {

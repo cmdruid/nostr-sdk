@@ -27,7 +27,7 @@
     }
   },
   "scripts": {
-    "build": "./scripts/build.sh",
+    "build": "./build.sh",
     "load": "tsx --tsconfig ./test/tsconfig.json",
     "release": "yarn test && yarn build",
     "scratch": "yarn load test/scratch.ts",
@@ -40,6 +40,7 @@
     "@rollup/plugin-typescript": "^11.1.6",
     "@types/node": "^20.11.16",
     "@types/tape": "^5.6.4",
+    "@types/ws": "^8.5.10",
     "rollup": "^4.9.6",
     "tap-spec": "^5.0.0",
     "tape": "^5.7.4",
@@ -52,7 +53,8 @@
     "@cmdcode/buff": "2.2.5",
     "@cmdcode/crypto-tools": "2.7.6",
     "@cmdcode/signer": "^1.4.2",
-    "websocket-polyfill": "^0.0.3",
+    "isomorphic-ws": "^5.0.0",
+    "ws": "^8.16.0",
     "zod": "^3.22.4"
   }
 }
