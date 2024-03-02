@@ -28,20 +28,23 @@ import {
   StoreItem
 } from '../types.js'
 
-const DEFAULT_CONFIG = {
-  buffer_timer : 2000,
-  debug        : false,
-  filter       : { limit : 10 } as EventFilter,
-  kind         : 30000,
-  socket       : null,
-  tags         : [],
-  verbose      : false
-}
-
 import * as assert from '@/assert.js'
 
 function DEFAULT_PARSER <T> (data : unknown) {
   return data as T
+}
+
+const STORE_DEFAULTS = () => {
+  return {
+    buffer_timer : 2000,
+    debug        : false,
+    filter       : { limit : 10 } as EventFilter,
+    kind         : 30000,
+    parser       : DEFAULT_PARSER,
+    socket       : null,
+    tags         : [],
+    verbose      : false
+  }
 }
 
 export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
@@ -56,7 +59,6 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
 
   readonly _filter : EventFilter
   readonly _opt    : StoreConfig<T>
-  readonly _parser : (data : unknown) => T
   readonly _secret : Buff
   readonly _signer : SignerAPI
 
@@ -72,14 +74,13 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     signer  : SignerAPI,
     config ?: Partial<StoreConfig<T>>
   ) {
-    const opt = { ...DEFAULT_CONFIG, ...config }
+    const opt = { ...STORE_DEFAULTS(), ...config }
 
     assert.is_hex(secret)
     assert.size(secret, 32)
 
     super()
     this._opt    = opt
-    this._parser = opt.parser ?? DEFAULT_PARSER
     this._signer = signer
     this._secret = Buff.str(secret).digest
 
@@ -94,10 +95,6 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     this._prev    = null
     this._socket  = opt.socket
     this._updated = null
-
-    if (this._socket !== null) {
-      this.socket.on('ready', () => void this.refresh())
-    }
   }
 
   get data () {
@@ -175,7 +172,7 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
 
   _event_handler (event : SignedEvent) {
     if (!this._event_filter(event)) {
-      this.log.debug('event filtered : ', event.id)
+      this.log.debug('event filtered  : ', event.id)
       return
     }
 
@@ -195,7 +192,7 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     }
 
     try {
-      store = this._parser(data)
+      store = this._opt.parser(data)
     } catch (err) {
       this.log.info('invalid data  :', data)
       this.log.debug('invalid data :', err)
@@ -229,9 +226,9 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     tags    : string[][],
     updated : number
     ) {
-    const parsed  = this._parser(data)
-    const json    = JSON.stringify(parsed, json_encoder)
-    const hash    = Buff.str(json).digest.hex
+    const parsed = this._opt.parser(data)
+    const json   = JSON.stringify(parsed, json_encoder)
+    const hash   = Buff.str(json).digest.hex
 
     const event = {
       content    : encrypt_content(json, this.secret),
@@ -272,8 +269,8 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
         this.emit('update', this)
       }
 
-      this.log.info('store updated  :', this.hash)
-      this.log.debug('store updated :', this.data)
+      this.log.info(' store updated  :', this.hash)
+      this.log.debug(' store updated  :', this.data)
     } catch (err) {
       this._err_handler('error', [ err, data ])
     }
@@ -283,7 +280,7 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
   connect (address : string, opt ?: Partial<SocketConfig>) {
     this._socket = this._socket ?? new NostrSocket(opt)
     this.socket.connect(address)
-    return this.refresh()
+    return this.fetch()
   }
 
   close () {
@@ -302,13 +299,14 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     opt    ?: Partial<SocketConfig>
   ) {
     this._socket = this._socket ?? new NostrSocket(opt)
+    this.update(store)
     this.socket.connect(address)
-    return this.update(store)
+    return this
   }
 
-  async refresh () {
+  async fetch () {
     await this.socket
-      .query(this.socket.address, this.filter)
+      .query(this.filter)
       .then(e => e.forEach(evt => this._event_handler(evt)))
     return this
   }
@@ -342,9 +340,8 @@ export async function fetch_stores (
     authors : [ signer.pubkey ],
     '#d'    : []
   })
-
-  const socket = new NostrSocket(options)
-  const result = await socket.query(address, filter)
+  const socket = await NostrSocket.connect(address, options)
+  const result = await socket.query(filter)
   const stores = result
     .filter(e => !has_entry('deleted', e.tags))
     .filter(e => check_store_key(e, signer))

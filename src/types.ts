@@ -55,14 +55,14 @@ export interface SocketConfig {
 }
 
 export interface StoreConfig<T> {
-  buffer_timer  : number
-  debug         : boolean
-  filter        : EventFilter
-  kind          : number
-  parser       ?: (data : unknown) => T
-  socket        : NostrSocket | null
-  tags          : string[][]
-  verbose       : boolean
+  buffer_timer : number
+  debug        : boolean
+  filter       : EventFilter
+  kind         : number
+  parser       : (data : unknown) => T
+  socket       : NostrSocket | null
+  tags         : string[][]
+  verbose      : boolean
 }
 
 export interface StoreItem {
@@ -72,6 +72,6 @@ export interface StoreItem {
 }
 
 export interface SubscribeConfig {
-  filter : EventFilter
+  socket : NostrSocket | null
   sub_id : string
 }

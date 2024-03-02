@@ -31,6 +31,7 @@ export const SOCKET_DEFAULTS = () : SocketConfig => {
 
 export class NostrSocket extends EventEmitter <{
   'cancel'    : [ id : string, sub : NostrSub, reason : string ]
+  'connected' : NostrSocket
   'close'     : NostrSocket
   'error'     : Error
   'event'     : EventMessage
@@ -40,6 +41,11 @@ export class NostrSocket extends EventEmitter <{
   'receipt'   : ReceiptEnvelope
   'subscribe' : [ id : string, sub : NostrSub ]
 }> {
+
+  static connect (address : string, opt ?: Partial<SocketConfig>) {
+    const socket = new NostrSocket(opt)
+    return socket.connect(address)
+  }
 
   readonly _opt : SocketConfig
 
@@ -182,8 +188,8 @@ export class NostrSocket extends EventEmitter <{
     const [ sub_id ] = payload
     const sub = this.get_sub(sub_id)
     sub._init = true
-    sub.emit('ready', sub)
     this.log.info('sub active     :', sub_id)
+    sub.emit('ready', sub)
     this.emit('subscribe', [ sub_id, sub ])
   }
 
@@ -241,7 +247,9 @@ export class NostrSocket extends EventEmitter <{
   }
 
   async connect (address ?: string) {
-    if (address !== undefined) {
+    const new_address = (address !== undefined && address !== this._address)
+
+    if (new_address) {
       this._address = address
     }
 
@@ -249,36 +257,30 @@ export class NostrSocket extends EventEmitter <{
       throw new Error('Must provide a valid relay address!')
     }
 
-    if (address !== undefined || this.socket.readyState > 1) {
+    if (
+      new_address           ||
+      this._socket === null ||
+      this.socket.readyState > 1
+    ) {
       this._socket = new WebSocket(this.address)
+      this.socket.addEventListener('error',   (event) => this._err_handler(event))
+      this.socket.addEventListener('open',    (event) => this._open_handler(event))
+      this.socket.addEventListener('message', (event) => this._msg_handler(event))
     }
 
-    if (this.connected) return
+    if (!this.connected) {
+      await this.when_connected() 
+      await this._subscribe()
+      await this._publish()
+      if (!this.ready) {
+        this._init = true
+        this.emit('ready', this)
+      } else {
+        this.emit('connected', this)
+      }
+    }
 
-    this.socket.addEventListener('error',   (event) => this._err_handler(event))
-    this.socket.addEventListener('open',    (event) => this._open_handler(event))
-    this.socket.addEventListener('message', (event) => this._msg_handler(event))
-
-    // Return a promise that includes a timeout.
-    const { connect_retries, connect_timeout } = this.opt
-    const timeout = 'failed to connect'
-    return new Promise((res, rej) => {
-      let count = 0, retries = connect_retries
-      let interval = setInterval(async () => {
-        if (this.connected) {
-          clearInterval(interval)
-          if (!this.ready) {
-            await this._subscribe()
-            await this._publish()
-            this._init = true
-            this.emit('ready', this)
-          }
-          res(this)
-        } else if (count > retries) {
-          rej(timeout)
-        } else { count++ }
-      }, connect_timeout)
-    }).catch(err => { throw new Error(err) })
+    return this
   }
 
   close () {
@@ -299,8 +301,8 @@ export class NostrSocket extends EventEmitter <{
     const { content, ...rest } = event
 
     this.log.info('event publish  :', rest.id)
-    this.log.debug('send message  :', content)
-    this.log.debug('send envelope :', rest)
+    this.log.debug('send message   :', content)
+    this.log.debug('send envelope  :', rest)
 
     if (!this.connected) {
       this.log.info('buffered evt   : ' + event.id)
@@ -310,15 +312,11 @@ export class NostrSocket extends EventEmitter <{
     }
   }
 
-  async query (
-    address : string,
-    filter  : EventFilter
-  ) {
+  async query (filter : EventFilter) {
     const events : SignedEvent[] = []
     const sub = this.subscribe(filter)
     sub.on('event', (event) => void events.push(event))
-    sub.on('ready', (sub) => sub.cancel())
-    this.connect(address)
+    sub.once('ready', (sub) => sub.cancel())
     await sub.when_ready()
     return events
   }
@@ -347,25 +345,24 @@ export class NostrSocket extends EventEmitter <{
   }
 
   subscribe (
-    filter : EventFilter,
-    config : Partial<SubscribeConfig> = {}
+    filter  : EventFilter,
+    config ?: Partial<SubscribeConfig>
   ) {
     /** Send a subscription message to the socket peer. */
-    const sub_id  = config.sub_id ?? Buff.random(32).hex
-    const subdata = new NostrSub(this, filter, { ...config, sub_id })  
+    const sub = new NostrSub(this, filter, config)  
 
-    this.subs.set(sub_id, subdata)
+    this.subs.set(sub.sub_id, sub)
+
+    if (this.connected) {
+      this.log.info('buffered sub   : ' + sub.sub_id)
+      this._subscribe([[ sub.sub_id, sub ]])
+    } else {
+      this.log.info('registered sub : ' + sub.sub_id)
+    }
 
     this.log.debug('sub filter:', filter)
 
-    if (this.connected) {
-      this.log.info('buffered sub   : ' + sub_id)
-      this._subscribe([[ sub_id, subdata ]])
-    } else {
-      this.log.info('registered sub : ' + sub_id)
-    }
-
-    return subdata
+    return sub
   }
 
   async when_cancel (sub_id : string) {
@@ -379,6 +376,24 @@ export class NostrSocket extends EventEmitter <{
           clearTimeout(timer)
           res(id)
         }
+      }, duration)
+    }).catch(err => { throw new Error(err) })
+  }
+
+  async when_connected () {
+    const duration = this.opt.connect_timeout
+    const retries  = this.opt.connect_retries
+    const timeout  = 'failed to connect'
+    return new Promise((res, rej) => {
+      let counter  = 0
+      let interval = setInterval(async () => {
+        if (this.connected) {
+          clearInterval(interval)
+          res(this)
+        } else if (counter > retries) {
+          clearInterval(interval)
+          rej(timeout)
+        } else { counter++ }
       }, duration)
     }).catch(err => { throw new Error(err) })
   }

@@ -22,14 +22,16 @@ import {
 
 import * as assert from '@/assert.js'
 
-export const CHANNEL_DEFAULTS : ChannelConfig = {
-  debug   : false,
-  echo    : false,
-  filter  : { since : now() },
-  kind    : 20000,
-  socket  : null,
-  tags    : [],
-  verbose : false
+export const CHANNEL_DEFAULTS = () => {
+  return {
+    debug   : false,
+    echo    : false,
+    filter  : { since : now() },
+    kind    : 20000,
+    socket  : null,
+    tags    : [],
+    verbose : false
+  }
 }
 
 export class NostrChannel extends EventEmitter <{
@@ -55,7 +57,7 @@ export class NostrChannel extends EventEmitter <{
     signer : SignerAPI,
     config : Partial<ChannelConfig> = {}
   ) {
-    const opt = { ...CHANNEL_DEFAULTS, ...config }
+    const opt = { ...CHANNEL_DEFAULTS(), ...config }
 
     assert.is_hex(secret)
     assert.size(secret, 32)
@@ -66,16 +68,12 @@ export class NostrChannel extends EventEmitter <{
     this._socket = opt.socket
     this._sub    = null
     this._signer = signer
-    this._secret = Buff.hex(secret)
+    this._secret = Buff.str(secret).digest
 
     this._filter = combine_filters(opt.filter, {
       kinds : [ opt.kind ],
       '#d'  : [ this.id ]
     })
-
-    if (this._socket !== null) {
-      this.socket.on('ready', () => void this._subscribe())
-    }
   }
 
   get address () {
@@ -162,19 +160,15 @@ export class NostrChannel extends EventEmitter <{
     this.emit('msg', msg)
   }
 
-  _subscribe () {
-    if (this._sub === null) {
-      this._sub = this.socket.subscribe(this._filter)
-      this.sub.on('cancel', ()    => void this.emit('cancel', this))
-      this.sub.on('event',  (evt) => void this._event_handler(evt))
-      if (!this.ready) {
-        this.sub.once('ready', () => {
-          void this.emit('ready', this)
-          this._init = true
-        })
-      }
-    } else {
-      this.sub.update()
+  _initialize () {
+    this._sub = this.socket.subscribe(this._filter)
+    this.sub.on('cancel', ()    => void this.emit('cancel', this))
+    this.sub.on('event',  (evt) => void this._event_handler(evt))
+    if (!this.ready) {
+      this.sub.once('ready', () => {
+        this._init = true
+        void this.emit('ready', this)
+      })
     }
   }
 
@@ -190,21 +184,26 @@ export class NostrChannel extends EventEmitter <{
     return this
   }
 
-  connect (address : string, opt ?: Partial<SocketConfig>) {
+  async connect (address : string, opt ?: Partial<SocketConfig>) {
     this._socket = this._socket ?? new NostrSocket(opt)
-    this._subscribe()
-    return this.socket.connect(address)
+    this._initialize()
+    await this.socket.connect(address)
+    return this
+  }
+
+  fetch () {
+    if (this._sub === null) {
+      this._initialize()
+    } else {
+      this.sub.update()
+    }
   }
 
   on_topic <T = any> (
     topic : string, 
     fn    : (msg : EventMessage<T>) => void
   ) {
-    this.on('msg', (msg) => {
-      if (msg.subject === topic) {
-        fn(msg)
-      }
-    })
+    this.on('msg', (msg) => { if (msg.subject === topic) fn(msg) })
   }
 
   async send (
@@ -229,5 +228,9 @@ export class NostrChannel extends EventEmitter <{
 
     this.socket.publish(signed)
     return this
+  }
+
+  refresh () {
+    this.sub.update()
   }
 }
