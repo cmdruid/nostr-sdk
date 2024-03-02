@@ -22,7 +22,7 @@ import {
 
 import * as assert from '@/assert.js'
 
-export const CHANNEL_DEFAULTS = () => {
+const CHANNEL_DEFAULTS = () => {
   return {
     debug   : false,
     echo    : false,

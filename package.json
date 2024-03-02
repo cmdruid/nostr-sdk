@@ -28,8 +28,9 @@
   },
   "scripts": {
     "build": "./scripts/build.sh",
+    "docs": "yarn typedoc --options docs/config.json",
     "load": "tsx --tsconfig ./test/tsconfig.json",
-    "release": "yarn test && yarn build",
+    "release": "yarn test && yarn build && yarn docs",
     "scratch": "yarn load test/scratch.ts",
     "test": "yarn load test/tape.ts | tap-spec"
   },

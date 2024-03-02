@@ -29,5 +29,5 @@
     "noUnusedParameters": true
   },
   "exclude": [ "node_modules" ],
-  "include": [ "**/*.ts" ]
+  "include": [ "**/*.ts", "../docs/tdplugin.js" ]
 }

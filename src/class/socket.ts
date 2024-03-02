@@ -18,7 +18,7 @@ import {
   UnsignedEvent,
 } from '../types.js'
 
-export const SOCKET_DEFAULTS = () : SocketConfig => {
+const SOCKET_DEFAULTS = () : SocketConfig => {
   return {
     connect_retries : 10,
     connect_timeout : 500,

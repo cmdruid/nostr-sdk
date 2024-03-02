@@ -13,7 +13,8 @@ import {
   check_store_key,
   decrypt_content,
   decrypt_store_key,
-  encrypt_content
+  encrypt_content,
+  encrypt_store_key
 } from '@/lib/crypto.js'
 
 import {
@@ -228,9 +229,7 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     ) {
     const parsed = this._opt.parser(data)
     const json   = JSON.stringify(parsed, json_encoder)
-    const hash   = Buff.str(json).digest.hex
-
-    const event = {
+    const event  = {
       content    : encrypt_content(json, this.secret),
       created_at : updated,
       kind       : this._opt.kind,
@@ -238,9 +237,10 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
       pubkey     : this.pubkey
     }
 
+    const rec = encrypt_store_key(event.content, this.secret, this._signer)
+
     event.tags.push([ 'd', this.id ])
-    event.tags.push([ 'hash', hash ])
-    event.tags.push([ 'cred', this.id ])
+    event.tags.push([ 'rec', ...rec ])
 
     tags.forEach(tag => event.tags.push(tag))
 
@@ -328,7 +328,7 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
   }
 }
 
-export async function fetch_stores (
+async function fetch_stores (
   address  : string,
   signer   : SignerAPI,
   filter  ?: EventFilter,
@@ -337,9 +337,9 @@ export async function fetch_stores (
   filter = filter ?? { kinds : [ 30000 ] }
 
   filter = combine_filters(filter, {
-    authors : [ signer.pubkey ],
-    '#d'    : []
+    authors : [ signer.pubkey ]
   })
+
   const socket = await NostrSocket.connect(address, options)
   const result = await socket.query(filter)
   const stores = result

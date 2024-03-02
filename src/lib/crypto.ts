@@ -36,20 +36,21 @@ export function encrypt_store_key (
   const hash = Buff.str(content).digest
   const hmac = signer.hmac('256', hash)
   const enc  = encrypt_content(secret, hmac)
-  const id   = hmac.digest
-  return Buff.join([ id, enc ])
+  const id   = hmac.digest.hex
+  return [ id, enc ]
 }
 
 export function check_store_key (
-  event   : SignedEvent,
-  signer  : SignerAPI
+  event  : SignedEvent,
+  signer : SignerAPI
 ) {
-  if (!has_entry('rec', event.tags)) return false
-  const tags = get_entry('rec', event.tags)
-  const hash = Buff.str(event.content).digest
+  const { content, tags } = event
+  if (!has_entry('rec', tags)) return false
+  const entry = get_entry('rec', tags)
+  const hash = Buff.str(content).digest
   const hmac = signer.hmac('256', hash)
   const id   = hmac.digest.hex
-  return (tags[1] === id)
+  return (entry[1] === id)
 }
 
 export function decrypt_store_key (

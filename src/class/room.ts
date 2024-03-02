@@ -1,21 +1,20 @@
 import { SignerAPI }    from '@cmdcode/signer'
-
 import { NostrChannel } from './channel.js'
 import { EventEmitter } from './emitter.js'
 import { NostrSocket }  from './socket.js'
 import { NostrStore }   from './store.js'
-import { EventMessage } from '@/types.js'
 
-interface RoomConfig {
-  debug   : boolean
-  echo    : boolean
-  verbose : boolean
-}
+import {
+  EventMessage,
+  RoomConfig
+} from '@/types.js'
 
-const ROOM_DEFAULTS = {
-  debug   : false,
-  echo    : false,
-  verbose : false
+const ROOM_DEFAULTS = () => {
+  return {
+    debug   : false,
+    echo    : false,
+    verbose : false
+  }
 }
 
 export class NostrRoom <T extends {}> extends EventEmitter <{
@@ -23,6 +22,8 @@ export class NostrRoom <T extends {}> extends EventEmitter <{
   'ready'  : NostrRoom<T>
   'update' : NostrRoom<T>
 }>{
+
+  static list = NostrStore.list
 
   readonly _opt    : RoomConfig
   readonly _socket : NostrSocket
@@ -36,7 +37,7 @@ export class NostrRoom <T extends {}> extends EventEmitter <{
     signer   : SignerAPI,
     options ?: Partial<RoomConfig>
   ) {
-    const opt    = { ...ROOM_DEFAULTS, ...options }
+    const opt    = { ...ROOM_DEFAULTS(), ...options }
     const socket = new NostrSocket(opt)
 
     super()
@@ -63,7 +64,6 @@ export class NostrRoom <T extends {}> extends EventEmitter <{
   }
 
   _initialize () {
-    console.log(this._store.ready, this._sub.ready)
     if (this._store.ready && this._sub.ready) {
       this._init = true
       this.emit('ready', this)
@@ -79,6 +79,10 @@ export class NostrRoom <T extends {}> extends EventEmitter <{
     this._sub.fetch()
     this._socket.connect(address)
     return this
+  }
+
+  delete () {
+    return this._store.delete()
   }
 
   async init (address : string, data : T) {

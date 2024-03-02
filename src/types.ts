@@ -23,14 +23,15 @@ export interface EventMessage <T = any> {
   subject  : string
 }
 
-export type EventFilter = {
+export interface EventFilter {
   ids     ?: string[]
   authors ?: string[]
   kinds   ?: number[]
   since   ?: number
   until   ?: number
   limit   ?: number
-} & { [ key : string ] : any | undefined }
+  [ key : string ] : any | undefined
+}
 
 export interface UnsignedEvent {
   content    : string
@@ -43,6 +44,12 @@ export interface UnsignedEvent {
 export interface SignedEvent extends UnsignedEvent {
   id         : string
   sig        : string
+}
+
+export interface RoomConfig {
+  debug   : boolean
+  echo    : boolean
+  verbose : boolean
 }
 
 export interface SocketConfig {

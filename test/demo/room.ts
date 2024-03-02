@@ -3,10 +3,11 @@ import { Signer }    from '@cmdcode/signer'
 import { NostrRoom } from '@cmdcode/nostr-sdk'
 
 const secret = Buff.str('test').digest.hex
-const signer = Signer.generate()
+const seed   = Buff.str('alice').digest.hex
+const signer = new Signer({ seed })
 
 const room = new NostrRoom(secret, signer, {
-  debug   : false,
+  debug   : true,
   echo    : true,
   verbose : true
 })
@@ -27,7 +28,7 @@ room.on('ready', () => {
   console.log('room is ready')
   //console.log(room.data)
   // room.send('test', JSON.stringify({ msg : 'hello world!' }))
-  // store.update({ test : '456' }, [[ 'deleted', 'true' ]])
+  // room.delete()
 })
 
 room.on('msg', (msg) => {

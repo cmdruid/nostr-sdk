@@ -1,8 +1,5 @@
 import { z } from 'zod'
 
-type Literal = z.infer<typeof literal>
-type Json    = Literal | { [key: string]: Json } | Json[]
-
 const num   = z.number().max(Number.MAX_SAFE_INTEGER),
       str   = z.string(),
       stamp = z.number().min(500_000_000)
@@ -10,14 +7,6 @@ const num   = z.number().max(Number.MAX_SAFE_INTEGER),
 const hex = z.string()
   .regex(/^[0-9a-fA-F]*$/)
   .refine(e => e.length % 2 === 0)
-
-const literal = z.union([
-  z.string(), z.number(), z.boolean(), z.null()
-])
-
-const json : z.ZodType<Json> = z.lazy(() =>
-  z.union([literal, z.array(json), z.record(json)])
-)
 
 const label  = z.string().regex(/^[0-9a-zA-Z_-]{2,64}$/)
 const hash   = hex.refine((e) => e.length === 64)
@@ -41,8 +30,6 @@ const signed_note = unsigned_note.extend({
 export {
   hash,
   hex,
-  json,
-  literal,
   label,
   unsigned_note,
   signed_note,
