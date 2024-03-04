@@ -1,6 +1,7 @@
 import { Buff }            from '@cmdcode/buff'
 import { SignerAPI }       from '@cmdcode/signer'
-import { EventEmitter }    from './emitter.js'
+import { EventEmitter }    from '@/class/emitter.js'
+import { NostrSocket }     from '@/class/socket.js'
 import { combine_filters } from '@/lib/filter.js'
 
 import {
@@ -16,10 +17,6 @@ import {
   encrypt_content,
   encrypt_store_key
 } from '@/lib/crypto.js'
-
-import {
-  NostrSocket,
-} from './socket.js'
 
 import {
   EventFilter,
@@ -306,7 +303,7 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
 
   async fetch () {
     await this.socket
-      .query(this.filter)
+      .prefetch(this.filter)
       .then(e => e.forEach(evt => this._event_handler(evt)))
     return this
   }
@@ -332,23 +329,22 @@ async function fetch_stores (
   address  : string,
   signer   : SignerAPI,
   filter  ?: EventFilter,
-  options ?: SocketConfig
+  options ?: Partial<SocketConfig>
 ) : Promise<StoreItem[]> {
   filter = filter ?? { kinds : [ 30000 ] }
 
   filter = combine_filters(filter, {
     authors : [ signer.pubkey ]
   })
-
-  const socket = await NostrSocket.connect(address, options)
-  const result = await socket.query(filter)
+  const result = await NostrSocket.query(address, filter, options)
   const stores = result
     .filter(e => !has_entry('deleted', e.tags))
     .filter(e => check_store_key(e, signer))
   return stores.map(e => {
-    const secret = decrypt_store_key(e, signer)
-    const id     = Buff.hex(secret).digest.hex
-    return { id, secret, updated_at : e.created_at }
+    const { created_at, id, pubkey } = e
+    const secret   = decrypt_store_key(e, signer)
+    const topic_id = Buff.hex(secret).digest.hex
+    return { pubkey, secret, topic_id, store_id : id, updated_at : created_at }
   })
 }
 

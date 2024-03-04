@@ -47,6 +47,17 @@ export class NostrSocket extends EventEmitter <{
     return socket.connect(address)
   }
 
+  static query (
+    address : string, 
+    filter  : EventFilter, 
+    opt    ?: Partial<SocketConfig>
+  ) {
+    const socket = new NostrSocket(opt)
+    const events = socket.prefetch(filter, true)
+    socket.connect(address)
+    return events
+  }
+
   readonly _opt : SocketConfig
 
   _address  : string | null
@@ -312,11 +323,17 @@ export class NostrSocket extends EventEmitter <{
     }
   }
 
-  async query (filter : EventFilter) {
+  async prefetch (filter : EventFilter, close = false) {
     const events : SignedEvent[] = []
     const sub = this.subscribe(filter)
     sub.on('event', (event) => void events.push(event))
-    sub.once('ready', (sub) => sub.cancel())
+    sub.once('ready', (sub) => {
+      if (close) {
+        this.close()
+      } else {
+        sub.cancel()
+      }
+    })
     await sub.when_ready()
     return events
   }

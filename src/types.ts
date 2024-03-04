@@ -73,8 +73,10 @@ export interface StoreConfig<T> {
 }
 
 export interface StoreItem {
-  id         : string
+  pubkey     : string
   secret     : string
+  store_id   : string
+  topic_id   : string
   updated_at : number
 }
 
