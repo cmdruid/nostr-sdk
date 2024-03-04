@@ -241,16 +241,18 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
       content    : encrypt_content(json, this.secret),
       created_at : updated,
       kind       : this._opt.kind,
-      tags       : this._opt.tags,
+      tags       : [ ...this._opt.tags ],
       pubkey     : this.pubkey
     }
 
-    const rec = encrypt_store_key(event.content, this.secret, this._signer)
+    const rec = encrypt_store_key(this.secret, this._signer)
 
     event.tags.push([ 'd', this.id ])
     event.tags.push([ 'rec', ...rec ])
 
     tags.forEach(tag => event.tags.push(tag))
+
+    console.log('evt2:', event)
 
     const signer = (msg : string) => this._signer.sign(msg)
     const signed = await this.socket.sign(event, signer)
@@ -346,29 +348,31 @@ async function fetch_stores (
   filter  ?: EventFilter,
   options ?: Partial<SocketConfig>
 ) : Promise<StoreItem[]> {
+  // Set a default filter if none is provided.
   filter = filter ?? { kinds : [ 30000 ] }
-
+  // Add the signer as an author to the filter.
   filter = combine_filters(filter, {
     authors : [ signer.pubkey ]
   })
-
-  const result = await NostrSocket.query(address, filter, options)
-  const stores = result
+  // Define an array to store our results.
+  let result : StoreItem[] = []
+  // Query the relay for events.
+  const query  = await NostrSocket.query(address, filter, options)
+  // Filter the events for recoverable stores.
+  const stores = query
     .filter(e => !has_entry('deleted', e.tags))
-    .filter(e => {
-      const has_key = check_store_key(e, signer)
-      if (options?.debug) {
-        console.log('[list] key status:', has_key)
-        console.log('[list] event:', e)
-      }
-      return has_key
-    })
-  return stores.map(e => {
-    const { created_at, id, pubkey } = e
-    const secret   = decrypt_store_key(e, signer)
-    const topic_id = Buff.hex(secret).digest.hex
-    return { pubkey, secret, topic_id, store_id : id, updated_at : created_at }
+    .filter(e => check_store_key(e, signer))
+  // Convert each store event into a list item.
+  stores.forEach(e => {
+    try {
+      const { created_at, id, pubkey } = e
+      const secret   = decrypt_store_key(e, signer)
+      const topic_id = Buff.hex(secret).digest.hex
+      result.push({ pubkey, secret, topic_id, store_id : id, updated_at : created_at })
+    } catch {}
   })
+  // Return the resulting list items.
+  return result
 }
 
 function json_encoder (_key : string, value : any) {

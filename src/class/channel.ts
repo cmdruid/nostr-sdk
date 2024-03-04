@@ -217,7 +217,7 @@ export class NostrChannel extends EventEmitter <{
       content    : encrypt_content(json, this.secret),
       created_at : now(),
       kind       : this._opt.kind,
-      tags       : this._opt.tags,
+      tags       : [ ...this._opt.tags ],
       pubkey     : this.pubkey
     }
 

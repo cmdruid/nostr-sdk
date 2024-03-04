@@ -1,12 +1,15 @@
-import { SignedEvent } from '@/types.js'
 import { Buff, Bytes } from '@cmdcode/buff'
+import { SignerAPI }   from '@cmdcode/signer'
+import { SignedEvent } from '@/types.js'
 
 import {
   encrypt_cbc,
   decrypt_cbc
 } from '@cmdcode/crypto-tools/cipher'
-import { SignerAPI } from '@cmdcode/signer'
+
 import { get_entry, has_entry } from './util.js'
+
+import * as assert from '@/assert.js'
 
 export function encrypt_content (
   content : string,
@@ -29,11 +32,10 @@ export function decrypt_content (
 }
 
 export function encrypt_store_key (
-  content : string,
-  secret  : string,
-  signer  : SignerAPI
+  secret : string,
+  signer : SignerAPI
 ) {
-  const hash = Buff.str(content).digest
+  const hash = Buff.hex(secret).digest
   const hmac = signer.hmac('256', hash)
   const enc  = encrypt_content(secret, hmac)
   const id   = hmac.digest.hex
@@ -44,21 +46,29 @@ export function check_store_key (
   event  : SignedEvent,
   signer : SignerAPI
 ) {
-  const { content, tags } = event
-  if (!has_entry('rec', tags)) return false
-  const entry = get_entry('rec', tags)
-  const hash = Buff.str(content).digest
+  if (
+    !has_entry('d', event.tags) || 
+    !has_entry('rec', event.tags)
+  ) {
+    return false
+  }
+  const hash = get_entry('d', event.tags)[1]
+  const rid  = get_entry('rec', event.tags)[1]
+  assert.ok(typeof hash === 'string')
+  assert.ok(typeof rid  === 'string')
   const hmac = signer.hmac('256', hash)
   const id   = hmac.digest.hex
-  return (entry[1] === id)
+  return (rid === id)
 }
 
 export function decrypt_store_key (
   event   : SignedEvent,
   signer  : SignerAPI
 ) {
-  const tags  = get_entry('rec', event.tags)
-  const hash  = Buff.str(event.content).digest
-  const hmac  = signer.hmac('256', hash)
-  return decrypt_content(tags[2], hmac)
+  const enc = get_entry('rec', event.tags)[2]
+  const rid = get_entry('d', event.tags)[1]
+  assert.ok(typeof enc === 'string')
+  assert.ok(typeof rid === 'string')
+  const hmac = signer.hmac('256', rid)
+  return decrypt_content(enc, hmac)
 }
