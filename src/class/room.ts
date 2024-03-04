@@ -34,7 +34,6 @@ export class NostrRoom <T extends {}> extends EventEmitter <{
   _init : boolean
 
   constructor (
-    secret   : string,
     signer   : SignerAPI,
     options ?: Partial<RoomConfig>
   ) {
@@ -45,14 +44,14 @@ export class NostrRoom <T extends {}> extends EventEmitter <{
     
     this._opt    = opt
     this._socket = socket
-    this._store  = new NostrStore(secret, signer, { ...opt, socket })
-    this._sub    = new NostrChannel(secret, signer, { ...opt, socket })
+    this._store  = new NostrStore(signer, { ...opt, socket })
+    this._sub    = new NostrChannel(signer, { ...opt, socket })
     this._init   = false
 
-    this._store.once ('ready',  ()    => void this._initialize())
+    this._store.once ('ready',  ()    => void this._ready_check())
     this._store.on   ('fetch',  ()    => void this.emit('fetch', this))
     this._store.on   ('update', ()    => void this.emit('update', this))
-    this._sub.once   ('ready',  ()    => void this._initialize())
+    this._sub.once   ('ready',  ()    => void this._ready_check())
     this._sub.on     ('msg',    (msg) => void this.emit('msg', msg))
   }
 
@@ -64,7 +63,12 @@ export class NostrRoom <T extends {}> extends EventEmitter <{
     return this._store.store
   }
 
-  _initialize () {
+  _initialize (secret : string) {
+    this._store._initialize(secret)
+    this._sub._initialize(secret)
+  }
+
+  _ready_check () {
     if (this._store.ready && this._sub.ready) {
       this._init = true
       this.emit('ready', this)
@@ -78,9 +82,12 @@ export class NostrRoom <T extends {}> extends EventEmitter <{
   /**
    * Connect to the room using the specified relay address.
    */
-  async connect (address : string) : Promise<NostrRoom<T>> {
-    this._store.fetch()
-    this._sub.fetch()
+  async connect (
+    address : string,
+    secret  : string
+  ) : Promise<NostrRoom<T>> {
+    this._initialize(secret)
+    this._store._fetch()
     this._socket.connect(address)
     return this
   }
@@ -93,9 +100,13 @@ export class NostrRoom <T extends {}> extends EventEmitter <{
     return this._store.fetch()
   }
 
-  async init (address : string, data : T) {
+  async init (
+    address : string,
+    data    : T,
+    secret  : string
+  ) {
+    this._initialize(secret)
     this._store.update(data)
-    this._sub.fetch()
     this._socket.connect(address)
     return this
   }

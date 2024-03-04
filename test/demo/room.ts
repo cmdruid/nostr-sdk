@@ -6,7 +6,7 @@ const secret = Buff.str('test').digest.hex
 const seed   = Buff.str('alice').digest.hex
 const signer = new Signer({ seed })
 
-const room = new NostrRoom(secret, signer, {
+const room = new NostrRoom(signer, {
   debug   : true,
   echo    : true,
   verbose : true
@@ -44,5 +44,5 @@ room.on('update', () => {
   //console.log(room.data)
 })
 
-room.init('wss://relay.damus.io', { test : '123' })
+room.init('wss://relay.damus.io', { test : '123' }, secret)
 // room.connect('wss://relay.damus.io')

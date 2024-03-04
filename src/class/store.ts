@@ -59,42 +59,34 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
 
   static list = fetch_stores
 
-  readonly _filter : EventFilter
   readonly _opt    : StoreConfig<T>
-  readonly _secret : Buff
   readonly _signer : SignerAPI
 
   _buffer ?: ReturnType<typeof setTimeout>
   _data    : T           | null
+  _filter  : EventFilter | null
   _init    : boolean
   _prev    : T           | null
+  _secret  : Buff        | null
   _socket  : NostrSocket | null
   _updated : number      | null
 
   constructor (
-    secret  : string,
     signer  : SignerAPI,
     config ?: Partial<StoreConfig<T>>
   ) {
     const opt = { ...STORE_DEFAULTS(), ...config }
 
-    assert.is_hex(secret)
-    assert.size(secret, 32)
-
     super()
     this._opt    = opt
     this._signer = signer
-    this._secret = Buff.hex(secret)
-
-    this._filter = combine_filters(opt.filter, {
-      kinds : [ opt.kind ],
-      '#d'  : [ this.id  ]
-    })
 
     this._buffer  = undefined
     this._data    = null
+    this._filter  = null
     this._init    = false
     this._prev    = null
+    this._secret  = null
     this._socket  = opt.socket
     this._updated = null
   }
@@ -107,6 +99,9 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
   }
 
   get filter () {
+    if (this._filter === null) {
+      throw new Error('store is not initialized')
+    }
     return this._filter
   }
 
@@ -116,6 +111,9 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
   }
 
   get id () {
+    if (this._secret === null) {
+      throw new Error('store is not initialized')
+    }
     return this._secret.digest.hex
   }
 
@@ -128,6 +126,9 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
   }
 
   get secret () {
+    if (this._secret === null) {
+      throw new Error('store is not initialized')
+    }
     return this._secret.hex
   }
 
@@ -223,6 +224,16 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     this.emit('error', [ err, data ])
   }
 
+  _initialize (secret : string) {
+    assert.is_hex(secret)
+    assert.size(secret, 32)
+    this._secret = Buff.hex(secret)
+    this._filter = combine_filters(this._opt.filter, {
+      kinds : [ this._opt.kind ],
+      '#d'  : [ this.id  ]
+    })
+  }
+
   async _fetch () {
     return this.socket
       .prefetch(this.filter)
@@ -251,8 +262,6 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     event.tags.push([ 'rec', ...rec ])
 
     tags.forEach(tag => event.tags.push(tag))
-
-    console.log('evt2:', event)
 
     const signer = (msg : string) => this._signer.sign(msg)
     const signed = await this.socket.sign(event, signer)
@@ -283,8 +292,13 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     return this
   }
 
-  connect (address : string, opt ?: Partial<SocketConfig>) {
+  connect (
+    address : string, 
+    secret  : string,
+    opt    ?: Partial<SocketConfig>
+  ) {
     this._socket = this._socket ?? new NostrSocket(opt)
+    this._initialize(secret)
     this.socket.connect(address)
     return this._fetch()
   }
@@ -306,11 +320,13 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
   }
 
   init (
-    address : string, 
+    address : string,
+    secret  : string,
     store   : T, 
     opt    ?: Partial<SocketConfig>
   ) {
     this._socket = this._socket ?? new NostrSocket(opt)
+    this._initialize(secret)
     this.update(store)
     this.socket.connect(address)
     return this

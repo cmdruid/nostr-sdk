@@ -4,7 +4,7 @@ import { NostrChannel } from '@cmdcode/nostr-sdk'
 
 const signer = Signer.generate()
 const secret = Buff.str('test').digest.hex
-const chan   = new NostrChannel(secret, signer, { echo : true })
+const chan   = new NostrChannel(signer, { echo : true })
 
 chan.on('error', console.log)
 chan.on('reject', console.log)
@@ -24,4 +24,4 @@ chan.on('ready', () => {
   chan.send('test', JSON.stringify({ msg : 'hello world!' }))
 })
 
-chan.connect('wss://relay.damus.io', { verbose : true })
+chan.connect('wss://relay.damus.io', secret, { verbose : true })

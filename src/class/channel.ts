@@ -43,37 +43,29 @@ export class NostrChannel extends EventEmitter <{
   'reject' : [ reason : string, event : SignedEvent ]
 }> {
 
-  readonly _filter : EventFilter
   readonly _opt    : ChannelConfig
-  readonly _secret : Buff
   readonly _signer : SignerAPI
 
+  _filter : EventFilter | null
   _init   : boolean
+  _secret : Buff | null
   _socket : NostrSocket | null
   _sub    : NostrSub    | null
 
   constructor (
-    secret : string,
     signer : SignerAPI,
     config : Partial<ChannelConfig> = {}
   ) {
     const opt = { ...CHANNEL_DEFAULTS(), ...config }
 
-    assert.is_hex(secret)
-    assert.size(secret, 32)
-
     super()
     this._opt    = opt
+    this._filter = null
     this._init   = false
     this._socket = opt.socket
     this._sub    = null
     this._signer = signer
-    this._secret = Buff.hex(secret)
-
-    this._filter = combine_filters(opt.filter, {
-      kinds : [ opt.kind ],
-      '#d'  : [ this.id ]
-    })
+    this._secret = null
   }
 
   get address () {
@@ -85,6 +77,9 @@ export class NostrChannel extends EventEmitter <{
   }
 
   get id () {
+    if (this._secret === null) {
+      throw new Error('channel not connected')
+    }
     return this._secret.digest.hex
   }
 
@@ -97,6 +92,9 @@ export class NostrChannel extends EventEmitter <{
   }
 
   get secret () {
+    if (this._secret === null) {
+      throw new Error('channel not connected')
+    }
     return this._secret.hex
   }
 
@@ -109,7 +107,7 @@ export class NostrChannel extends EventEmitter <{
 
   get sub () {
     if (this._sub === null) {
-      throw new Error('socket not initialized')
+      throw new Error('channel not initialized')
     }
     return this._sub
   }
@@ -160,10 +158,19 @@ export class NostrChannel extends EventEmitter <{
     this.emit('msg', msg)
   }
 
-  _initialize () {
+  _initialize (secret : string) {
+    assert.is_hex(secret)
+    assert.size(secret, 32)
+    this._secret = Buff.hex(secret)
+    this._filter = combine_filters(this._opt.filter, {
+      kinds : [ this._opt.kind ],
+      '#d'  : [ this.id ]
+    })
+
     this._sub = this.socket.subscribe(this._filter)
     this.sub.on('cancel', ()    => void this.emit('cancel', this))
     this.sub.on('event',  (evt) => void this._event_handler(evt))
+
     if (!this.ready) {
       this.sub.once('ready', () => {
         this._init = true
@@ -184,19 +191,15 @@ export class NostrChannel extends EventEmitter <{
     return this
   }
 
-  async connect (address : string, opt ?: Partial<SocketConfig>) {
+  async connect (
+    address : string,
+    secret  : string,
+    opt    ?: Partial<SocketConfig>
+  ) {
     this._socket = this._socket ?? new NostrSocket(opt)
-    this._initialize()
+    this._initialize(secret)
     await this.socket.connect(address)
     return this
-  }
-
-  fetch () {
-    if (this._sub === null) {
-      this._initialize()
-    } else {
-      this.sub.update()
-    }
   }
 
   on_topic <T = any> (

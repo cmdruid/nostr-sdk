@@ -5,7 +5,7 @@ import { NostrStore } from '@cmdcode/nostr-sdk'
 const seed   = Buff.str('alice').digest.hex
 const signer = new Signer({ seed })
 const secret = Buff.str('test').digest.hex
-const store  = new NostrStore(secret, signer)
+const store  = new NostrStore(signer)
 
 store.on('error', console.log)
 store.on('reject', console.log)
@@ -26,6 +26,4 @@ store.on('fetch', () => {
 })
 
 // store.init('wss://relay.damus.io', { test : '123' })
-await store.connect('wss://relay.damus.io')
-
-store.fetch()
+await store.connect('wss://relay.damus.io', secret)
