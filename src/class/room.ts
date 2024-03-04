@@ -86,6 +86,10 @@ export class NostrRoom <T extends {}> extends EventEmitter <{
     return this._store.delete()
   }
 
+  fetch () {
+    return this._store.fetch()
+  }
+
   async init (address : string, data : T) {
     this._store.update(data)
     this._sub.fetch()

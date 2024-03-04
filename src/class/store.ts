@@ -220,6 +220,12 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     this.emit('error', [ err, data ])
   }
 
+  async _fetch () {
+    return this.socket
+      .prefetch(this.filter)
+      .then(e => e.forEach(evt => this._event_handler(evt)))
+  }
+
   async _send (
     data    : unknown,
     tags    : string[][],
@@ -279,7 +285,7 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
   connect (address : string, opt ?: Partial<SocketConfig>) {
     this._socket = this._socket ?? new NostrSocket(opt)
     this.socket.connect(address)
-    return this.fetch()
+    return this._fetch()
   }
 
   close () {
@@ -292,6 +298,12 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     this.update(this.data, [[ 'deleted', 'true' ]])
   }
 
+  async fetch () {
+    await this._fetch()
+    this.emit('fetch', this)
+    return this
+  }
+
   init (
     address : string, 
     store   : T, 
@@ -300,14 +312,6 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     this._socket = this._socket ?? new NostrSocket(opt)
     this.update(store)
     this.socket.connect(address)
-    return this
-  }
-
-  async fetch () {
-    await this.socket
-      .prefetch(this.filter)
-      .then(e => e.forEach(evt => this._event_handler(evt)))
-    this.emit('fetch', this)
     return this
   }
 
