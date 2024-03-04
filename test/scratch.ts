@@ -1,6 +1,6 @@
-import { Buff }      from '@cmdcode/buff'
-import { Signer }    from '@cmdcode/signer'
-import { NostrRoom, NostrSocket, NostrStore } from '@cmdcode/nostr-sdk'
+import { Buff }       from '@cmdcode/buff'
+import { Signer }     from '@cmdcode/signer'
+import { NostrStore } from '@cmdcode/nostr-sdk'
 
 const addr   = 'wss://relay.damus.io'
 const seed   = Buff.str('alice').digest.hex
