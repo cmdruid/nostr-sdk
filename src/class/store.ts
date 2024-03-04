@@ -356,7 +356,14 @@ async function fetch_stores (
   const result = await NostrSocket.query(address, filter, options)
   const stores = result
     .filter(e => !has_entry('deleted', e.tags))
-    .filter(e => check_store_key(e, signer))
+    .filter(e => {
+      const has_key = check_store_key(e, signer)
+      if (options?.debug) {
+        console.log('[list] key status:', has_key)
+        console.log('[list] event:', e)
+      }
+      return has_key
+    })
   return stores.map(e => {
     const { created_at, id, pubkey } = e
     const secret   = decrypt_store_key(e, signer)

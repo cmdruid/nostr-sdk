@@ -152,6 +152,7 @@ export class NostrSocket extends EventEmitter <{
     this.log.info('event sub      :', sub_id)
     this.log.info('event id       :', id)
     this.log.info('event date     :', new Date(created_at * 1000))
+    this.log.debug('event payload :', JSON.stringify(event, null, 2))
 
     if (!verify_sig(sig, id, pubkey)) {
       return this._bounce_handler('invalid signature for event', json)

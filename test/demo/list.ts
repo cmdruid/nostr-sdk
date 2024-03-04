@@ -5,9 +5,8 @@ import { NostrRoom } from '@cmdcode/nostr-sdk'
 const address = 'wss://relay.damus.io' 
 const seed    = Buff.str('alice').digest.hex
 const signer  = new Signer({ seed })
+const rooms   = await NostrRoom.list(address, signer, undefined, { verbose : true })
 
-const stores = await NostrRoom.list(address, signer, undefined, { verbose : true })
+console.log('rooms:')
 
-console.log('stores:')
-
-console.dir(stores, { depth: null })
+console.dir(rooms, { depth: null })
