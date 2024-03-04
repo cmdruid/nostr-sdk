@@ -342,6 +342,14 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
   }
 }
 
+/**
+ * Fetch a list of recoverable stores from the relay.
+ * @param address 
+ * @param signer 
+ * @param filter 
+ * @param options 
+ * @returns 
+ */
 async function fetch_stores (
   address  : string,
   signer   : SignerAPI,
