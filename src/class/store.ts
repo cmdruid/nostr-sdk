@@ -29,7 +29,10 @@ import {
 import * as assert from '@/assert.js'
 
 function DEFAULT_PARSER <T> (data : unknown) {
-  return data as T
+  if (typeof data !== 'object') return data as T
+  if (data == null)             return data as T
+  if (Array.isArray(data))      return [ ...data ] as T
+  return { ...data } as T
 }
 
 const STORE_DEFAULTS = () => {
@@ -256,11 +259,7 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     return this
   }
 
-  async _update (
-    data    : T,
-    tags    : string[][],
-    updated : number
-  ) {
+  async _update (data : T, tags : string[][], updated : number) {
     try {
       await this._send(data, tags, updated)
       this._updated = updated
@@ -274,8 +273,8 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
         this.emit('update', this)
       }
 
-      this.log.info(' store updated  :', this.hash)
-      this.log.debug(' store updated  :', this.data)
+      this.log.info  (' store updated  :', this.hash)
+      this.log.debug (' store updated  :', this.data)
     } catch (err) {
       this._err_handler('error', [ err, data ])
     }
