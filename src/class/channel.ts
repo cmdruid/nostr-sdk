@@ -68,7 +68,7 @@ export class NostrChannel extends EventEmitter <{
     this._socket = opt.socket
     this._sub    = null
     this._signer = signer
-    this._secret = Buff.str(secret).digest
+    this._secret = Buff.hex(secret)
 
     this._filter = combine_filters(opt.filter, {
       kinds : [ opt.kind ],

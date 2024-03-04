@@ -84,7 +84,7 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     super()
     this._opt    = opt
     this._signer = signer
-    this._secret = Buff.str(secret).digest
+    this._secret = Buff.hex(secret)
 
     this._filter = combine_filters(opt.filter, {
       kinds : [ opt.kind ],
