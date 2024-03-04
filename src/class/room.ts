@@ -18,6 +18,7 @@ const ROOM_DEFAULTS = () => {
 }
 
 export class NostrRoom <T extends {}> extends EventEmitter <{
+  'fetch'  : NostrRoom<T>
   'msg'    : EventMessage
   'ready'  : NostrRoom<T>
   'update' : NostrRoom<T>
@@ -49,10 +50,10 @@ export class NostrRoom <T extends {}> extends EventEmitter <{
     this._init   = false
 
     this._store.once ('ready',  ()    => void this._initialize())
+    this._store.on   ('fetch',  ()    => void this.emit('fetch', this))
     this._store.on   ('update', ()    => void this.emit('update', this))
     this._sub.once   ('ready',  ()    => void this._initialize())
     this._sub.on     ('msg',    (msg) => void this.emit('msg', msg))
-
   }
 
   get data () {

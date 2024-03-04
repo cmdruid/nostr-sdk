@@ -48,6 +48,7 @@ const STORE_DEFAULTS = () => {
 export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
   'close'  : NostrStore<T>
   'error'  : [ error : unknown, data : unknown ]
+  'fetch'  : NostrStore<T>
   'ready'  : NostrStore<T>
   'reject' : [ reason : string, event : SignedEvent ]
   'update' : NostrStore<T>
@@ -184,7 +185,7 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
 
     try {
       const json = decrypt_content(content, this.secret)
-      data       = JSON.parse(json, json_decoder)
+            data = JSON.parse(json, json_decoder)
     } catch {
       return this._bounce_handler('unable to decrypt store', event)
     }
@@ -226,6 +227,7 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     ) {
     const parsed = this._opt.parser(data)
     const json   = JSON.stringify(parsed, json_encoder)
+
     const event  = {
       content    : encrypt_content(json, this.secret),
       created_at : updated,
@@ -305,6 +307,7 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     await this.socket
       .prefetch(this.filter)
       .then(e => e.forEach(evt => this._event_handler(evt)))
+    this.emit('fetch', this)
     return this
   }
 
