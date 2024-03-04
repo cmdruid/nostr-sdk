@@ -257,9 +257,9 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
   }
 
   async _update (
-    data : T,
-    tags : string[][] = [],
-    updated = now()
+    data    : T,
+    tags    : string[][],
+    updated : number
   ) {
     try {
       await this._send(data, tags, updated)
@@ -315,6 +315,11 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     return this
   }
 
+  refresh () {
+    this._updated = null
+    return this.fetch()
+  }
+
   toString () {
     return JSON.stringify(this.data, null, 2)
   }
@@ -323,8 +328,12 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     return this.data
   }
 
-  update (data : T, tags ?: string[][]) {
-    return this._update(data, tags)
+  update (
+    data       : T, 
+    tags       : string[][] = [], 
+    updated_at : number = now()
+  ) {
+    return this._update(data, tags, updated_at)
   }
 
   [Symbol.iterator] () {
@@ -343,6 +352,7 @@ async function fetch_stores (
   filter = combine_filters(filter, {
     authors : [ signer.pubkey ]
   })
+
   const result = await NostrSocket.query(address, filter, options)
   const stores = result
     .filter(e => !has_entry('deleted', e.tags))

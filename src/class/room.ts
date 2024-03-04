@@ -75,7 +75,10 @@ export class NostrRoom <T extends {}> extends EventEmitter <{
     return this._sub.on_topic(topic, fn)
   }
 
-  async connect (address : string) {
+  /**
+   * Connect to the room using the specified relay address.
+   */
+  async connect (address : string) : Promise<NostrRoom<T>> {
     this._store.fetch()
     this._sub.fetch()
     this._socket.connect(address)
@@ -97,11 +100,19 @@ export class NostrRoom <T extends {}> extends EventEmitter <{
     return this
   }
 
+  refresh () {
+    return this._store.refresh()
+  }
+
   send (subject : string, body : string) {
     return this._sub.send(subject, body)
   }
 
-  update (data : T) {
-    return this._store.update(data)
+  update (
+    data        : T, 
+    tags       ?: string[][], 
+    updated_at ?: number
+  ) {
+    return this._store.update(data, tags, updated_at)
   }
 }
