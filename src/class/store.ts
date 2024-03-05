@@ -232,6 +232,7 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
       kinds : [ this._opt.kind ],
       '#d'  : [ this.id  ]
     })
+    this.socket.on('close', () => void this.emit('close', this))
   }
 
   async _fetch () {
@@ -305,7 +306,6 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
 
   close () {
     this.socket.close()
-    this.emit('close', this)
     return this
   }
 

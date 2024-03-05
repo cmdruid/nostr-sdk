@@ -18,6 +18,7 @@ const ROOM_DEFAULTS = () => {
 }
 
 export class NostrRoom <T extends {}> extends EventEmitter <{
+  'close'  : NostrRoom<T>
   'fetch'  : NostrRoom<T>
   'msg'    : EventMessage
   'ready'  : NostrRoom<T>
@@ -59,6 +60,13 @@ export class NostrRoom <T extends {}> extends EventEmitter <{
     return this._store.data
   }
 
+  get socket () {
+    if (this._socket === null) {
+      throw new Error('socket not initialized')
+    }
+    return this._socket
+  }
+
   get store () {
     return this._store.store
   }
@@ -66,6 +74,7 @@ export class NostrRoom <T extends {}> extends EventEmitter <{
   _initialize (secret : string) {
     this._store._initialize(secret)
     this._sub._initialize(secret)
+    this.socket.on('close', () => void this.emit('close', this))
   }
 
   _ready_check () {
@@ -75,8 +84,9 @@ export class NostrRoom <T extends {}> extends EventEmitter <{
     }
   }
 
-  on_topic <T> (topic : string, fn : (msg: EventMessage<T>) => void) {
-    return this._sub.on_topic(topic, fn)
+  close () {
+    this.socket.close()
+    return this
   }
 
   /**
@@ -109,6 +119,10 @@ export class NostrRoom <T extends {}> extends EventEmitter <{
     this._store.update(data)
     this._socket.connect(address)
     return this
+  }
+
+  on_topic <T> (topic : string, fn : (msg: EventMessage<T>) => void) {
+    return this._sub.on_topic(topic, fn)
   }
 
   refresh () {

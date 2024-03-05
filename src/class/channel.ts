@@ -168,8 +168,9 @@ export class NostrChannel extends EventEmitter <{
     })
 
     this._sub = this.socket.subscribe(this._filter)
-    this.sub.on('cancel', ()    => void this.emit('cancel', this))
-    this.sub.on('event',  (evt) => void this._event_handler(evt))
+    this.sub.on('cancel',   ()    => void this.emit('cancel', this))
+    this.sub.on('event',    (evt) => void this._event_handler(evt))
+    this.socket.on('close', ()    => void this.emit('close', this))
 
     if (!this.ready) {
       this.sub.once('ready', () => {
@@ -181,13 +182,11 @@ export class NostrChannel extends EventEmitter <{
 
   cancel () {
     this.sub.cancel()
-    this.emit('cancel', this)
     return this
   }
 
   close () {
     this.socket.close()
-    this.emit('close', this)
     return this
   }
 
