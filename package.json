@@ -1,6 +1,6 @@
 {
   "name": "@cmdcode/nostr-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A development kit for building nostr apps.",
   "author": "Christopher Scott",
   "license": "MIT",
