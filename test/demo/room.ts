@@ -12,6 +12,9 @@ const room = new NostrRoom(signer, {
   verbose : true
 })
 
+room.on('error', console.log)
+room.on('reject', console.log)
+
 room._socket.on('ready', () => {
   console.log('socket is ready')
 })
@@ -44,5 +47,5 @@ room.on('update', () => {
   //console.log(room.data)
 })
 
-room.init('wss://relay.damus.io', { test : '123' }, secret)
-// room.connect('wss://relay.damus.io')
+//room.init('wss://relay.damus.io', { test : '123' }, secret)
+room.connect('wss://relay.damus.io', secret)

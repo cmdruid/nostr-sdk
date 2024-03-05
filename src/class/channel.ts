@@ -37,7 +37,7 @@ const CHANNEL_DEFAULTS = () => {
 export class NostrChannel extends EventEmitter <{
   'cancel' : NostrChannel
   'close'  : NostrChannel
-  'error'  : [ error : unknown, event : SignedEvent ]
+  'error'  : [ error : unknown, data : unknown ]
   'msg'    : EventMessage
   'ready'  : NostrChannel
   'reject' : [ reason : string, event : SignedEvent ]
@@ -127,6 +127,12 @@ export class NostrChannel extends EventEmitter <{
     this.emit('reject', [ reason, event ])
   }
 
+  _err_handler (err : unknown, data : unknown) {
+    this.log.debug('error:', err)
+    this.log.debug('data:', data)
+    this.emit('error', [ err, data ])
+  }
+
   _event_handler (event : SignedEvent) {
     if (!this._opt.echo && event.pubkey === this.pubkey) {
       return
@@ -185,8 +191,8 @@ export class NostrChannel extends EventEmitter <{
     return this
   }
 
-  close () {
-    this.socket.close()
+  async close () {
+    await this.socket.close()
     return this
   }
 
@@ -195,7 +201,7 @@ export class NostrChannel extends EventEmitter <{
     secret  : string,
     opt    ?: Partial<SocketConfig>
   ) {
-    this._socket = this._socket ?? new NostrSocket(opt)
+    this._socket = this._socket ?? new NostrSocket(opt ?? this._opt)
     this._initialize(secret)
     await this.socket.connect(address)
     return this
@@ -205,7 +211,13 @@ export class NostrChannel extends EventEmitter <{
     topic : string, 
     fn    : (msg : EventMessage<T>) => void
   ) {
-    this.on('msg', (msg) => { if (msg.subject === topic) fn(msg) })
+    this.on('msg', (msg) => {
+      try {
+        if (msg.subject === topic) fn(msg)
+      } catch (err) {
+        this._err_handler(err, msg)
+      }
+    })
   }
 
   async send (

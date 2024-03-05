@@ -6,7 +6,8 @@ import { NostrStore }   from './store.js'
 
 import {
   EventMessage,
-  RoomConfig
+  RoomConfig,
+  SignedEvent
 } from '@/types.js'
 
 const ROOM_DEFAULTS = () => {
@@ -19,9 +20,11 @@ const ROOM_DEFAULTS = () => {
 
 export class NostrRoom <T extends {}> extends EventEmitter <{
   'close'  : NostrRoom<T>
+  'error'  : [ error : unknown, data : unknown ]
   'fetch'  : NostrRoom<T>
   'msg'    : EventMessage
   'ready'  : NostrRoom<T>
+  'reject' : [ reason : string, event : SignedEvent ]
   'update' : NostrRoom<T>
 }>{
 
@@ -54,6 +57,12 @@ export class NostrRoom <T extends {}> extends EventEmitter <{
     this._store.on   ('update', ()    => void this.emit('update', this))
     this._sub.once   ('ready',  ()    => void this._ready_check())
     this._sub.on     ('msg',    (msg) => void this.emit('msg', msg))
+
+    this._store.on('error',  (err) => void this.emit('error', err))
+    this._store.on('reject', (err) => void this.emit('reject', err))
+    this._sub.on('error',    (err) => void this.emit('error', err))
+    this._sub.on('reject',   (err) => void this.emit('reject', err))
+
   }
 
   get data () {
@@ -84,8 +93,8 @@ export class NostrRoom <T extends {}> extends EventEmitter <{
     }
   }
 
-  close () {
-    this.socket.close()
+  async close () {
+    await this.socket.close()
     return this
   }
 
@@ -111,9 +120,9 @@ export class NostrRoom <T extends {}> extends EventEmitter <{
   }
 
   async init (
-    address : string,
-    data    : T,
-    secret  : string
+    address  : string,
+    secret   : string,
+    data     : T,
   ) {
     this._initialize(secret)
     this._store.update(data)
@@ -133,11 +142,7 @@ export class NostrRoom <T extends {}> extends EventEmitter <{
     return this._sub.send(subject, body)
   }
 
-  update (
-    data        : T, 
-    tags       ?: string[][], 
-    updated_at ?: number
-  ) {
-    return this._store.update(data, tags, updated_at)
+  update (data : T, updated ?: number) {
+    return this._store.update(data, updated)
   }
 }

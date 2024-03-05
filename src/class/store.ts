@@ -211,7 +211,11 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
 
     this._buffer = setTimeout(() => {
       try {
-        this._update(data, [], this.updated_at)
+        this._update(data, this.updated_at)
+        if (!this.ready) {
+          this._init = true
+          this.emit('ready', this)
+        }
       } catch (err) {
         this._err_handler(err, data)
       }
@@ -220,7 +224,7 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
 
   _err_handler (err : unknown, data : unknown) {
     this.log.debug('error:', err)
-    this.log.debug('event:', data)
+    this.log.debug('data:', data)
     this.emit('error', [ err, data ])
   }
 
@@ -271,46 +275,45 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     return this
   }
 
-  async _update (data : T, tags : string[][], updated : number) {
-    try {
-      await this._send(data, tags, updated)
-      this._updated = updated
-      this._prev    = this._data ?? data
-      this._data    = data
-
-      if (!this.ready) {
-        this._init = true
-        this.emit('ready', this)
-      } else {
-        this.emit('update', this)
-      }
-
-      this.log.info  (' store updated  :', this.hash)
-      this.log.debug (' store updated  :', this.data)
-    } catch (err) {
-      this._err_handler('error', [ err, data ])
+  _update (data : T, updated : number) {
+    if (this._updated !== null && updated < this._updated) {
+      console.log(`current: ${this._updated} / new: ${updated}`)
+      throw new Error('updating with bad timestamp')
     }
+
+    this._updated = updated
+    this._prev    = this._data ?? data
+    this._data    = data
+
+    if (this.ready) {
+      this.emit('update', this)
+    }
+
+    this.log.info  (' store updated  :', this.hash)
+    this.log.debug (' store updated  :', this.data)
+
     return this
   }
 
-  connect (
+  async connect (
     address : string, 
     secret  : string,
     opt    ?: Partial<SocketConfig>
   ) {
-    this._socket = this._socket ?? new NostrSocket(opt)
+    this._socket = this._socket ?? new NostrSocket(opt ?? this._opt)
     this._initialize(secret)
-    this.socket.connect(address)
-    return this._fetch()
+    this._fetch()
+    await this.socket.connect(address)
+    return this
   }
 
-  close () {
-    this.socket.close()
+  async close () {
+    await this.socket.close()
     return this
   }
 
   delete () {
-    this.update(this.data, [[ 'deleted', 'true' ]])
+    this._send(this.data, [[ 'deleted', 'true' ]], now())
   }
 
   async fetch () {
@@ -319,13 +322,19 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
     return this
   }
 
-  init (
+  async init (
     address : string,
     secret  : string,
     store   : T, 
     opt    ?: Partial<SocketConfig>
   ) {
-    this._socket = this._socket ?? new NostrSocket(opt)
+    this._socket = this._socket ?? new NostrSocket(opt ?? this._opt)
+
+    this.socket.once('ready', () => {
+      this._init = true
+      this.emit('ready', this)
+    })
+
     this._initialize(secret)
     this.update(store)
     this.socket.connect(address)
@@ -346,11 +355,12 @@ export class NostrStore <T extends Record<string, any>> extends EventEmitter<{
   }
 
   update (
-    data       : T, 
-    tags       : string[][] = [], 
+    data       : T,
     updated_at : number = now()
   ) {
-    return this._update(data, tags, updated_at)
+    this._update(data, updated_at)
+    this._send(data, [], updated_at)
+    return this
   }
 
   [Symbol.iterator] () {

@@ -295,10 +295,14 @@ export class NostrSocket extends EventEmitter <{
     return this
   }
 
-  close () {
-    this.socket.close()
+  async close () {
     this.subs.forEach(e => e.cancel())
+    if (this.connected) {
+      await sleep(2000)
+      this.socket.close()
+    }
     this.emit('close', this)
+    return this
   }
 
   get_sub (sub_id : string) {
@@ -311,8 +315,10 @@ export class NostrSocket extends EventEmitter <{
 
   publish (event : SignedEvent) {
     const { content, ...rest } = event
+    const { created_at, kind } = rest
 
     this.log.info('event publish  :', rest.id)
+    this.log.info('event digest   :', { created_at, kind })
     this.log.debug('send message   :', content)
     this.log.debug('send envelope  :', rest)
 

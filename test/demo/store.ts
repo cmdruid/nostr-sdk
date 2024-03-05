@@ -16,20 +16,11 @@ store.on('update', () => {
 })
 
 store.on('ready', () => {
-  store.socket.on('event', (evt) => {
-    console.log('event:', evt)
-  })
-
   console.log('ready')
   console.log(store.data)
   store.update({ test : '456' })
 })
 
-store.init (
-  'wss://relay.damus.io', 
-  secret, 
-  { test : '123' },
-  { verbose : true, debug : true }
-)
+// store.init('wss://relay.damus.io', secret, { test : '123' })
 
-// store.connect('wss://relay.damus.io')
+store.connect('wss://relay.damus.io', secret)
