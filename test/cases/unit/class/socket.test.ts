@@ -158,6 +158,7 @@ export default function socket_tests (t: Test) {
         receivedEvent = msg
       })
 
+      socket.send([ 'REQ', 'sub123', {} ])
       mock.simulateMessage([ 'EVENT', 'sub123', testEvent ])
 
       t.ok(receivedEvent, 'event emitted')

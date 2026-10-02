@@ -13,6 +13,7 @@ export class MessageQueue {
   private _queue    : ClientMessage[] = []
   private _timer    : NodeJS.Timeout | undefined
   private _flushing : boolean = false
+  private _generation : number = 0
 
   /**
    * Creates a new message queue.
@@ -42,12 +43,15 @@ export class MessageQueue {
     this._flushing = true
     // Use setImmediate (Node.js) or setTimeout(0) to defer to next tick.
     const defer = typeof setImmediate !== 'undefined' ? setImmediate : (fn: () => void) => setTimeout(fn, 0)
-    defer(() => this._flush())
+    const generation = this._generation
+    defer(() => this._flush(generation))
   }
 
-  private _flush () {
+  private _flush (generation : number) {
+    if (generation !== this._generation) return
     // Process a batch of messages.
     this._process()
+    if (generation !== this._generation) return
     // If there are more messages, schedule the next batch.
     if (this.size > 0) {
       // Get the queue interval.
@@ -55,10 +59,10 @@ export class MessageQueue {
       // Set a new timeout for the next batch.
       this._timer = setTimeout(() => {
         this._timer = undefined
-        this._flush()
+        this._flush(generation)
       }, ival)
       // Don't block process exit while waiting to flush.
-      this._timer.unref()
+      if (typeof this._timer.unref === 'function') this._timer.unref()
     } else {
       // Done flushing.
       this._flushing = false
@@ -91,6 +95,7 @@ export class MessageQueue {
 
   /** Clears all pending messages from the queue. */
   public clear () {
+    this._generation += 1
     // Clear the queue.
     this._queue = []
     // Clear the timeout if it exists.

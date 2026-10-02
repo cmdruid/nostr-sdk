@@ -16,6 +16,19 @@ import {
 
 import type { RpcMessageData, RequestRpcMessage } from '@/types/index.js'
 
+function wait_for_message (node: NostrNode, topic: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { node.off('message', handler); reject(new Error(`missing ${topic} announcement`)) }, 5000)
+    const handler = (message: RpcMessageData) => {
+      if (message.type !== 'event' || message.topic !== topic) return
+      clearTimeout(timer)
+      node.off('message', handler)
+      resolve()
+    }
+    node.on('message', handler)
+  })
+}
+
 export default async function node_feature_tests (t: Test) {
   const relay1 = new NostrRelay()
   const relay2 = new NostrRelay()
@@ -279,12 +292,7 @@ export default async function node_feature_tests (t: Test) {
 
       await Promise.all([node1.connect(), node2.connect()])
 
-      let received = false
-      node2.on('message', (msg: RpcMessageData) => {
-        if (msg.type === 'event' && (msg as any).topic === 'test-topic') {
-          received = true
-        }
-      })
+      const received = wait_for_message(node2, 'test-topic')
 
       // Announce to peer (fire-and-forget)
       const results = node1.announce(
@@ -293,9 +301,8 @@ export default async function node_feature_tests (t: Test) {
       )
 
       await Promise.all(results)
-      await wait_ms(500)
-
-      t.ok(received, 'peer received announcement')
+      await received
+      t.pass('peer received announcement')
 
       node1.close()
       node2.close()
@@ -317,16 +324,7 @@ export default async function node_feature_tests (t: Test) {
 
       await Promise.all([node1.connect(), node2.connect(), node3.connect()])
 
-      let received2 = false
-      let received3 = false
-
-      node2.on('message', (msg: RpcMessageData) => {
-        if (msg.type === 'event') received2 = true
-      })
-
-      node3.on('message', (msg: RpcMessageData) => {
-        if (msg.type === 'event') received3 = true
-      })
+      const received = Promise.all([wait_for_message(node2, 'broadcast'), wait_for_message(node3, 'broadcast')])
 
       // Announce to both peers
       const results = node1.announce(
@@ -335,10 +333,9 @@ export default async function node_feature_tests (t: Test) {
       )
 
       await Promise.all(results)
-      await wait_ms(500)
-
-      t.ok(received2, 'node2 received announcement')
-      t.ok(received3, 'node3 received announcement')
+      await received
+      t.pass('node2 received announcement')
+      t.pass('node3 received announcement')
 
       node1.close()
       node2.close()

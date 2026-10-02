@@ -182,6 +182,10 @@ new NostrSocket(url: string, options?: Partial<NostrSocketConfig>)
 | `notice` | `string` | NOTICE message from relay |
 | `receipt` | `RelayReceiptMessage` | OK receipt for published event |
 
+EVENT signatures and event IDs are verified before delivery to `message` or `event` listeners. Invalid events emit `reject`. Queries and persistent subscriptions also enforce their requested filters locally; they do not trust the relay to select matching events. This intentionally excludes invalid or unrelated responses that older releases could deliver. Control messages such as EOSE, NOTICE and OK keep their existing behavior.
+
+Timer handling supports browser numeric handles and preserves Node.js `unref()` behavior when available.
+
 ### NostrClient
 
 Multi-relay client with event deduplication.
@@ -405,3 +409,53 @@ Contributions are welcome. Please open an issue or submit a pull request.
 ## License
 
 [MIT License](LICENSE)
+
+### 1.0.2 release preparation
+
+The 1.0.2 source includes browser-safe timers, event signature verification before
+consumer delivery, local subscription filters, and socket/queue teardown fixes.
+Incoming EVENT messages must match a registered subscription (including temporary
+queries) or a REQ sent through the socket. Unknown subscription IDs and mismatched
+filters are discarded before signature verification; matching events still require
+valid hashes and signatures before reaching message/event listeners or caches.
+Explicit close drops pending sends and closes connecting as well as open transports.
+
+This version metadata prepares a release. Publishing 1.0.2 and updating consuming
+applications' dependency resolutions and lockfiles are separate required steps;
+applications pinned to 1.0.1 continue to use that published implementation.
+
+
+### Relay lifecycle and receive limits (1.0.2)
+
+Explicit `close()` cancels subscriptions immediately and prevents reconnection.
+A remote transport drop suspends persistent subscriptions and retries connection
+up to `max_retries`, spaced by `queue_ival`; the same subscription resumes its
+filters after reconnection. A relay `CLOSED` response terminates that request.
+
+Incoming messages retain relay order, including EVENT before EOSE. Signature
+verification yields between batches (`verify_batch`, default 16 messages per
+turn). The queued backlog is capped (`receive_limit`, default 256); exceeding it
+emits an error, rejects incomplete queries, and drops the transport. Started
+persistent subscriptions reconnect within the same retry budget; repeated history
+overflows exhaust that budget and cancel the subscription until explicitly restarted.
+A processed EOSE resets the overflow retry budget. Callers may also
+connect again explicitly. Applications querying unusually
+large bursts can set a larger finite limit. Unsolicited or filter-mismatched
+events are discarded before verification, while all delivered events remain
+cryptographically verified.
+
+Caller-provided WebSocket objects are used for the initial connection. Recovery
+creates a new global `WebSocket` with the original URL; custom transport factories
+and constructor options are not retained. Callers needing those must manage their
+own replacement sockets. Constructors accept only `ws:`/`wss:` URLs and positive
+finite `verify_batch`/`receive_limit` integers.
+
+An empty filter object `{}` matches every event; an empty filter array `[]` matches
+none. Filter timestamps include their boundaries (including zero), and tag filters
+match tag index 1. Each filter's `limit` caps verified historical events before
+EOSE; live events after EOSE are not capped. Overlapping OR filters share delivered
+events, which count against every matching filter's remaining allowance.
+
+A listener timeout rejects if received messages for that request are still waiting
+for verification (for example in a throttled background tab). With no queued
+messages, the existing timed-collection behavior still returns collected events.

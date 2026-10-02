@@ -1,3 +1,4 @@
+import '#/helpers/websocket-runtime.js'
 /**
  * Integration Test Runner
  *

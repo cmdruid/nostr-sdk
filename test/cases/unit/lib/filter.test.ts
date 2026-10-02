@@ -87,8 +87,7 @@ export default function filter_tests (t: Test) {
 
     st.test('empty filter behavior', t => {
       const event = createSignedEvent()
-      // Empty filter should not match anything by default (no positive match criteria)
-      t.notOk(match_filter(event, {}), 'empty filter does not match')
+      t.ok(match_filter(event, {}), 'empty filter is a wildcard')
       t.end()
     })
 
@@ -184,17 +183,19 @@ export default function filter_tests (t: Test) {
       t.end()
     })
 
-    st.test('filter with only time constraints (no positive criteria)', t => {
+    st.test('filter with only time constraints', t => {
       const event = createSignedEvent()
 
-      t.notOk(match_filter(event, { since: 999999, until: 1000001 }), 'fails without positive criteria')
+      t.ok(match_filter(event, { since: 999999, until: 1000001 }), 'matches within time bounds')
       t.end()
     })
 
     st.test('filter with empty arrays (no positive criteria)', t => {
       const event = createSignedEvent()
 
-      t.notOk(match_filter(event, { kinds: [], authors: [] }), 'fails with empty arrays')
+      for (const filter of [{ kinds: [] }, { authors: [] }, { ids: [] }, { '#e': [] }]) {
+        t.notOk(match_filter(event, filter), 'fails with an explicitly empty constraint')
+      }
       t.end()
     })
 

@@ -90,7 +90,7 @@ export default async function subscription_failure_tests (t: Test) {
       t.end()
     })
 
-    st.test('listener resolves on socket close', async t => {
+    st.test('incomplete listener rejects on socket close', async t => {
       const socket = new NostrSocket(url)
       await socket.connect()
 
@@ -102,8 +102,10 @@ export default async function subscription_failure_tests (t: Test) {
       // Close socket after short delay
       setTimeout(() => socket.close(), 100)
 
-      const events = await listener
-      t.ok(Array.isArray(events), 'listener resolved on close')
+      await listener.then(
+        () => t.fail('incomplete listener returned partial success'),
+        error => t.match(error.message, /cancelled/, 'listener rejects on close')
+      )
       t.end()
     })
 

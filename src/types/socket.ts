@@ -14,6 +14,10 @@ export interface NostrSocketConfig {
   queue_limit : number
   msg_timeout : number
   sub_timeout : number
+  /** Maximum messages dispatched per event-loop turn. */
+  verify_batch? : number
+  /** Maximum queued relay messages before the connection fails closed. */
+  receive_limit? : number
 }
 
 export interface NostrSocketEvent extends Record<string, any[]> {

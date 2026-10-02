@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## [1.0.2]
+
+### Fixed
+- Bound consecutive overflow reconnects until a subscription completes EOSE, and reject timeout results while received messages await verification.
+- A caller-provided transport is replaced by a global WebSocket on reconnect; only the original URL is retained.
+- Constructors validate WebSocket URL strings and positive receive limits; `send()` requires a connected or connecting transport.
+- Empty filter objects match all events, while empty filter arrays match none. `listen()` rejects on cancellation/close instead of returning incomplete results.
+
+- Browser timer compatibility and deferred queue cancellation on close.
+- Immediate subscription timer cleanup on explicit close and persistent subscription recovery after remote disconnects.
+- Reject unsolicited and filter-mismatched relay events before signature verification; remove relay-closed verification targets.
+- Bound ordered verification batches and queued messages; disconnect overloaded relays without delivering unverified events.
+- Reject incomplete queries on transport loss/overflow, allow reconnect after overload, and preserve subscriptions activated after a drop.
+- Enforce per-filter historical limits locally without suppressing live events after EOSE.
+- Preserve EVENT/EOSE ordering and match tag-filter values only at tag index 1.
+
+### Build
+- Include master pull requests in CI, preserve test failures, and build portable release packages.
+
+
 ## [1.0.1]
 
 ### Fixed

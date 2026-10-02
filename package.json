@@ -1,6 +1,6 @@
 {
   "name": "@vbyte/nostr-sdk",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Software development kit for the nostr protocol.",
   "author": "Christopher Scott",
   "repository": {

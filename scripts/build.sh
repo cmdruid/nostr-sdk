@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 DIRECTORY="./dist"
 EXTENSIONS=("js" "ts")   # The file extensions to target. Add more extensions as needed.
@@ -11,7 +12,11 @@ mkdir -p "$DIRECTORY"
 
 # Copy and format the package.json file.
 cp package.json $DIRECTORY/package.json
-sed -i "s#$DIRECTORY#.#g" "$DIRECTORY/package.json"
+node --input-type=module -e '
+import fs from "node:fs";
+const path = "dist/package.json";
+fs.writeFileSync(path, fs.readFileSync(path, "utf8").replaceAll("./dist", "."));
+'
 
 # Build the current project source using tsc and rollup.
 npx tsc

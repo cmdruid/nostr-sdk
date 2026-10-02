@@ -74,26 +74,20 @@ export function match_filter (
   // Get the tag filters from the rest of the filter object.
   const tag_filters = get_tag_filters(rest)
 
-  // Check if any positive match criteria exist.
-  const has_criteria = (
-    (ids !== undefined && ids.length > 0) ||
-    (authors !== undefined && authors.length > 0) ||
-    (kinds !== undefined && kinds.length > 0) ||
-    tag_filters.length > 0
-  )
-
-  // If no criteria, no match (empty filter matches nothing).
-  if (!has_criteria) return false
+  // An explicitly empty tag constraint cannot match any event.
+  for (const [ tag, values ] of Object.entries(rest)) {
+    if (tag.startsWith('#') && Array.isArray(values) && values.length === 0) return false
+  }
 
   // Check each defined filter condition - ALL must pass (AND logic).
-  if (ids && ids.length > 0 && !ids.includes(event.id)) return false
-  if (authors && authors.length > 0 && !authors.includes(event.pubkey)) return false
-  if (kinds && kinds.length > 0 && !kinds.includes(event.kind)) return false
+  if (ids && !ids.includes(event.id)) return false
+  if (authors && !authors.includes(event.pubkey)) return false
+  if (kinds && !kinds.includes(event.kind)) return false
   if (tag_filters.length > 0 && !match_tags(tag_filters, event.tags)) return false
 
   // Check time constraints.
-  if (since && event.created_at < since) return false
-  if (until && event.created_at > until) return false
+  if (since !== undefined && event.created_at < since) return false
+  if (until !== undefined && event.created_at > until) return false
 
   return true
 }
@@ -128,7 +122,7 @@ export function match_tags (
     // Check if any of the filter values match any event tag (OR within group).
     let group_matched = false
     for (const [ tag, ...params ] of tags) {
-      if (key === tag && values.some(v => params.includes(v))) {
+      if (key === tag && values.some(v => params[0] === v)) {
         group_matched = true
         break
       }

@@ -4,10 +4,12 @@ import './cases/integration/runner.js'
 // Force exit after tests complete to prevent hanging on unclosed resources
 import tape from 'tape'
 
+let failed = false
+tape.onFailure(() => { failed = true })
 tape.onFinish(() => {
   // Give a moment for any final cleanup, then force exit
   setTimeout(() => {
-    process.exit(0)
+    process.exit(failed ? 1 : 0)
   }, 500)
 })
 

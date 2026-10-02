@@ -134,12 +134,12 @@ export default async function socket_failure_tests (t: Test) {
     })
 
     st.test('handles query with very short timeout', async t => {
-      const socket = new NostrSocket(url, { msg_timeout: 10 })
+      const socket = new NostrSocket(url, { msg_timeout: 2000 })
       await socket.connect()
 
       // Query should either succeed quickly or timeout
       try {
-        const results = await socket.query({ kinds: [1] })
+        const results = await socket.query({ kinds: [1] }, { duration: 10 })
         t.ok(Array.isArray(results), 'quick query succeeded')
       } catch (err: any) {
         t.ok(err.message, 'query timeout handled')

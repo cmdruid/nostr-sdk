@@ -1,3 +1,4 @@
+import '#/helpers/websocket-runtime.js'
 import tape from 'tape'
 
 // Crypto tests
@@ -23,6 +24,8 @@ import cache_tests   from './class/cache.test.js'
 import queue_tests   from './class/queue.test.js'
 import socket_tests  from './class/socket.test.js'
 import client_tests  from './class/client.test.js'
+import runtime_tests from './class/runtime.test.js'
+import lifecycle_tests from './class/lifecycle.test.js'
 
 tape('Crypto Unit Tests', t => {
   ecc_tests(t)
@@ -51,5 +54,7 @@ tape('Class Unit Tests', t => {
   queue_tests(t)
   socket_tests(t)
   client_tests(t)
+  runtime_tests(t)
+  lifecycle_tests(t)
   t.end()
 })

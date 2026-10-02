@@ -4,6 +4,8 @@ import { NostrSubscription } from '@/class/sub.js'
 
 import {
   parse_relay_message,
+  match_any_filter,
+  match_filter,
   validate_client_message,
   verify_event,
   wait_for_ready
@@ -19,16 +21,19 @@ import type {
   NostrSocketEvent,
   RelayNoticeMessage,
   RelayEventMessage,
+  RelayMessage,
   SubscriptionFilterOptions
 } from '@/types/index.js'
 
 /** Default configuration for NostrSocket instances. */
-export const SOCKET_CONFIG : NostrSocketConfig = {
+export const SOCKET_CONFIG : Required<NostrSocketConfig> = {
   max_retries : 3,
   queue_ival  : 500,
   queue_limit : 10,
   msg_timeout : 5000,
-  sub_timeout : 30000
+  sub_timeout : 30000,
+  verify_batch : 16,
+  receive_limit : 256
 }
 
 /**
@@ -36,11 +41,20 @@ export const SOCKET_CONFIG : NostrSocketConfig = {
  * Handles message parsing, event publishing, and subscription management.
  */
 export class NostrSocket extends EventEmitter <NostrSocketEvent> {
-  private readonly _config : NostrSocketConfig
+  private readonly _config : Required<NostrSocketConfig>
   private readonly _queue  : MessageQueue
   private readonly _subs   : Map<string, NostrSubscription> = new Map()
   private readonly _url    : string
+  private readonly _requests : Map<string, EventFilter[]> = new Map()
 
+  private readonly _filterCounts = new Map<string, number[]>()
+  private readonly _historyComplete = new Set<string>()
+  private _incoming : RelayMessage[] = []
+  private _receiveTimer : ReturnType<typeof setTimeout> | undefined
+  private _receiveBudget = 0
+  private _reconnectTimer : ReturnType<typeof setTimeout> | undefined
+  private _retries = 0
+  private _overflowRecovery = false
   private _closed      : boolean = false
   private _closeTimer  : NodeJS.Timeout | undefined
   private _init        : boolean = false
@@ -63,6 +77,11 @@ export class NostrSocket extends EventEmitter <NostrSocketEvent> {
     super()
     // Initialize the configuration.
     this._config = { ...SOCKET_CONFIG, ...options }
+    for (const key of ['verify_batch', 'receive_limit'] as const) {
+      const value = this._config[key]
+      if (!Number.isSafeInteger(value) || value < 1) throw new Error(`invalid ${key}`)
+    }
+    this._receiveBudget = this._config.verify_batch
     // Initialize the queue.
     this._queue  = new MessageQueue(this)
     // Handle string URL vs WebSocket instance.
@@ -122,7 +141,7 @@ export class NostrSocket extends EventEmitter <NostrSocketEvent> {
 
   /** Whether the WebSocket connection is established and ready. */
   get is_ready () {
-    return this._init
+    return this._init && this._ws?.readyState === WebSocket.OPEN
   }
 
   /** Map of active subscriptions by subscription ID. */
@@ -144,20 +163,27 @@ export class NostrSocket extends EventEmitter <NostrSocketEvent> {
   }
 
   private _close () {
+    this._init = false
+    this._requests.clear()
+    this._filterCounts.clear()
+    this._historyComplete.clear()
     // Clear the close timer if it exists.
     clearTimeout(this._closeTimer)
     // Clear the message queue.
     this._queue.clear()
-    // Unsubscribe from all subscriptions.
-    this._subs.forEach(sub => void sub.cancel())
-    // Clear the subscriptions map.
-    this._subs.clear()
+    this._clear_incoming()
+    // Remote disconnects suspend subscriptions; explicit close cancels them.
+    for (const sub of this._subs.values()) {
+      if (this._closed || !sub.persistent) sub._fail('relay disconnected')
+      else sub._pause()
+    }
     // Remove event listeners from the WebSocket.
     this._remove_listeners()
     // Set the socket to not initialized.
     this._init = false
     // Emit a closed event.
     this.emit('closed', this)
+    this._schedule_reconnect()
   }
 
   private _on_error (error : unknown) {
@@ -168,36 +194,108 @@ export class NostrSocket extends EventEmitter <NostrSocketEvent> {
   private _on_event (msg : RelayEventMessage) {
     // Extract the event from the message.
     const event = msg[2]
+    // Reject unsolicited and irrelevant traffic before expensive hashing/Schnorr
+    // checks. Every event that can reach consumers is still fully verified.
+    const filters = this._subs.get(msg[1])?.filters ?? this._requests.get(msg[1])
+    if (!filters || !match_any_filter(event, filters)) return
+    const counts = this._filterCounts.get(msg[1]) ?? filters.map(() => 0)
+    const eligible = filters.map((filter, index) => match_filter(event, filter) &&
+      (this._historyComplete.has(msg[1]) || filter.limit === undefined || counts[index] < filter.limit))
+    if (!eligible.some(Boolean)) return
     // Verify the event signature and integrity.
     const error = verify_event(event)
     // If validation fails, emit reject and return early.
     if (error !== null) {
       return this.emit('reject', event, error)
     }
+    if (!this._historyComplete.has(msg[1])) {
+      eligible.forEach((matches, index) => { if (matches) counts[index]++ })
+      this._filterCounts.set(msg[1], counts)
+    }
+    // Subscribers listen to message, so deliver only after verification.
+    this.emit('message', msg)
     // Emit the validated event.
     this.emit('event', msg)
   }
 
-  // Handle websocket messages from the relay.
-  private _on_message (message : unknown) {
-    // Parse the message.
-    try {
-      // Parse the relay message.
-      const parsed = parse_relay_message(message)
-      // If the message is not valid, emit a reject event.
-      if (!parsed.ok) return this.emit('reject', message, 'invalid message')
-      // Emit a message event.
-      this.emit('message', parsed.result)
-      // Handle the message.
-      switch (parsed.result[0]) {
-        case 'EVENT'  : this._on_event(parsed.result);   break
-        case 'NOTICE' : this._on_notice(parsed.result);  break
-        case 'OK'     : this._on_receipt(parsed.result); break
+  /** Whether this request still has received messages awaiting verification. */
+  public has_pending_messages (sub_id : string) {
+    return this._incoming.some(msg => (msg[0] === 'EVENT' || msg[0] === 'EOSE' || msg[0] === 'CLOSED') && msg[1] === sub_id)
+  }
+
+  private _clear_incoming () {
+    clearTimeout(this._receiveTimer)
+    this._receiveTimer = undefined
+    this._incoming = []
+    this._receiveBudget = this.config.verify_batch
+  }
+
+  private _drain_incoming () {
+    while (!this._closed && this._receiveBudget > 0 && this._incoming.length > 0) {
+      this._receiveBudget--
+      const msg = this._incoming.shift()
+      if (!msg) break
+      // Keep control messages behind preceding EVENT verification.
+      if (msg[0] === 'CLOSED') { this._requests.delete(msg[1]); this._filterCounts.delete(msg[1]); this._historyComplete.delete(msg[1]) }
+      if (msg[0] === 'EOSE') {
+        this._historyComplete.add(msg[1])
+        if (this._subs.has(msg[1])) { this._overflowRecovery = false; this._retries = 0 }
       }
+      if (msg[0] !== 'EVENT') this.emit('message', msg)
+      switch (msg[0]) {
+        case 'EVENT' : this._on_event(msg); break
+        case 'NOTICE' : this._on_notice(msg); break
+        case 'OK' : this._on_receipt(msg); break
+      }
+    }
+    if (!this._closed && !this._receiveTimer) {
+      this._receiveTimer = setTimeout(() => {
+        this._receiveTimer = undefined
+        this._receiveBudget = this.config.verify_batch
+        if (this._incoming.length > 0) this._drain_incoming()
+      }, 0)
+    }
+  }
+
+  // Bound cryptographic work per turn and retained backlog, without allowing
+  // EOSE to overtake verification. Overload fails the connection closed.
+  private _on_message (message : unknown) {
+    if (this._closed || (this._ws && this._ws.readyState >= WebSocket.CLOSING)) return
+    try {
+      const parsed = parse_relay_message(message)
+      if (!parsed.ok) return this.emit('reject', message, 'invalid message')
+      const msg = parsed.result
+      if (msg[0] === 'EVENT') {
+        const filters = this._subs.get(msg[1])?.filters ?? this._requests.get(msg[1])
+        if (!filters || !filters.some((filter, index) => match_filter(msg[2], filter) && (this._historyComplete.has(msg[1]) || filter.limit === undefined || (this._filterCounts.get(msg[1])?.[index] ?? 0) < filter.limit))) return
+      }
+      if (this._incoming.length >= this.config.receive_limit) {
+        this._overflowRecovery = true
+        this._on_error('relay verification backlog exceeded')
+        this._clear_incoming()
+        for (const sub of this._subs.values()) {
+          if (!sub.persistent || this._retries >= this.config.max_retries) sub._fail('relay verification backlog exceeded')
+          else sub._pause()
+        }
+        this._ws?.close()
+        return
+      }
+      this._incoming.push(msg)
+      this._drain_incoming()
     } catch (err : unknown) {
-      // Handle the error.
       this._on_error(err)
     }
+  }
+
+  private _schedule_reconnect () {
+    if (this._closed || !Array.from(this._subs.values()).some(sub => sub._needs_reconnect()) || this._reconnectTimer || this._retries >= this.config.max_retries) return
+    this._retries++
+    this._reconnectTimer = setTimeout(() => {
+      this._reconnectTimer = undefined
+      if (this._closed || this._subs.size === 0) return
+      void this.connect().catch(() => this._schedule_reconnect())
+    }, this.config.queue_ival)
+    if (typeof this._reconnectTimer.unref === 'function') this._reconnectTimer.unref()
   }
 
   private _on_notice (msg : RelayNoticeMessage) {
@@ -211,10 +309,18 @@ export class NostrSocket extends EventEmitter <NostrSocketEvent> {
   }
 
   private _open () {
+    if (this._closed) {
+      this._ws?.close()
+      return
+    }
     // If the socket is already initialized, return.
     if (this.is_ready) return
     // Set the socket to initialized.
     this._init = true
+    if (!this._overflowRecovery) this._retries = 0
+    clearTimeout(this._reconnectTimer)
+    this._reconnectTimer = undefined
+    for (const sub of this._subs.values()) sub._resume()
     // Emit a ready event.
     this.emit('ready', this)
   }
@@ -237,15 +343,23 @@ export class NostrSocket extends EventEmitter <NostrSocketEvent> {
     this._init = false
     // Mark socket as permanently closed to prevent reconnection.
     this._closed = true
+    clearTimeout(this._reconnectTimer)
+    this._reconnectTimer = undefined
+    this._clear_incoming()
+    for (const sub of this._subs.values()) sub.cancel()
+    this._queue.clear()
+    this._requests.clear()
+    this._filterCounts.clear()
+    this._historyComplete.clear()
     // Setup a timer to close the connection.
     this._closeTimer = setTimeout(() => {
-      // If the websocket exists and is open, close it.
-      if (this._ws && this._ws.readyState === WebSocket.OPEN) {
+      // Abort connecting transports as well as established connections.
+      if (this._ws && this._ws.readyState <= WebSocket.OPEN) {
         this._ws.close()
       }
     }, delay)
     // Don't block process exit while waiting to close.
-    this._closeTimer.unref()
+    if (typeof this._closeTimer.unref === 'function') this._closeTimer.unref()
   }
 
   /**
@@ -260,6 +374,9 @@ export class NostrSocket extends EventEmitter <NostrSocketEvent> {
     if (this.is_ready) return
     // Create WebSocket on demand if not initialized or if closed/closing.
     if (!this._ws || this._ws.readyState >= WebSocket.CLOSING) {
+      // A transport may enter CLOSING before emitting its close event.
+      if (this._init) this._close()
+      this._remove_listeners()
       this._ws = new WebSocket(this._url)
       this._attach_listeners()
     }
@@ -325,7 +442,7 @@ export class NostrSocket extends EventEmitter <NostrSocketEvent> {
     // Ensure socket is connected before querying.
     await this.connect()
     // Create a new subscription.
-    const sub = new NostrSubscription(filters, this)
+    const sub = new NostrSubscription(filters, this, undefined, false)
     // Use try/finally to ensure cleanup on both success and error.
     try {
       const events = await sub.listen(options)
@@ -342,8 +459,23 @@ export class NostrSocket extends EventEmitter <NostrSocketEvent> {
    * @throws     Error if the message fails validation
    */
   public send (msg : ClientMessage) {
+    if (!this._ws) {
+      if (msg[0] === 'CLOSE') return
+      throw new Error(`connect before sending to ${this.url}`)
+    }
+    if (this._closed || (this._ws && this._ws.readyState >= WebSocket.CLOSING)) {
+      // Cancellation after remote close must not enqueue an undeliverable CLOSE.
+      if (msg[0] === 'CLOSE') return
+      throw new Error(`socket is closed for ${this.url}`)
+    }
     // Validate the message.
     validate_client_message(msg)
+    if (msg[0] === 'REQ') {
+      this._requests.set(msg[1], msg.slice(2) as EventFilter[])
+      this._filterCounts.set(msg[1], msg.slice(2).map(() => 0))
+      this._historyComplete.delete(msg[1])
+    }
+    if (msg[0] === 'CLOSE') { this._requests.delete(msg[1]); this._filterCounts.delete(msg[1]); this._historyComplete.delete(msg[1]) }
     // Add the message to the queue.
     this._queue.push(msg)
   }

@@ -87,7 +87,7 @@ export class NostrClient extends EventEmitter <{
       ? new NostrSocket(relay, this.config)
       : relay
     // Listen for ready event to set _init flag.
-    socket.once('ready', () => {
+    socket.on('ready', () => {
       if (!this._init) this._init = true
     })
     // Listen for closed event and forward it.

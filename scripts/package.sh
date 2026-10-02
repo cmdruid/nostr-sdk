@@ -3,7 +3,7 @@
 # DUCAT Core Package Script
 # Runs the complete packaging pipeline: lint → typecheck → test → build
 
-set -e  # Exit on any error
+set -euo pipefail  # Include test failures in the formatter pipeline
 
 echo "🔧 Starting package process..."
 
